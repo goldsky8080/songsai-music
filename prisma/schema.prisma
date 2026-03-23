@@ -1,0 +1,193 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum CreditKind {
+  FREE
+  PAID
+}
+
+enum CreditGrantStatus {
+  ACTIVE
+  CONSUMED
+  EXPIRED
+}
+
+enum MusicStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum VideoStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum TransactionType {
+  DEPOSIT
+  USAGE
+  REFUND
+  ADJUSTMENT
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum JobTargetType {
+  MUSIC
+  VIDEO
+}
+
+enum JobType {
+  MUSIC_GENERATION
+  VIDEO_RENDER
+}
+
+enum QueueStatus {
+  QUEUED
+  ACTIVE
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id             String        @id @default(cuid())
+  email          String        @unique
+  passwordHash   String
+  freeCredits    Int           @default(0)
+  paidCredits    Int           @default(0)
+  tier           String?
+  role           UserRole      @default(USER)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  musics         Music[]
+  transactions   Transaction[]
+  generationJobs GenerationJob[]
+  creditGrants   CreditGrant[]
+}
+
+model Music {
+  id             String          @id @default(cuid())
+  userId         String
+  requestGroupId String?
+  lyrics         String
+  stylePrompt    String
+  provider       String
+  providerTaskId String?         @unique
+  mp3Url         String?
+  status         MusicStatus     @default(QUEUED)
+  duration       Int?
+  errorMessage   String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videos         Video[]
+  generationJobs GenerationJob[]
+
+  @@index([userId, createdAt])
+  @@index([requestGroupId, createdAt])
+  @@index([status])
+}
+
+model Video {
+  id             String          @id @default(cuid())
+  musicId        String
+  mp4Url         String?
+  bgImageUrl     String?
+  srtUrl         String?
+  status         VideoStatus     @default(QUEUED)
+  errorMessage   String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  music          Music           @relation(fields: [musicId], references: [id], onDelete: Cascade)
+  generationJobs GenerationJob[]
+
+  @@index([musicId, createdAt])
+  @@index([status])
+}
+
+model Transaction {
+  id           String             @id @default(cuid())
+  userId       String
+  amount       Int
+  creditKind   CreditKind?
+  type         TransactionType
+  status       TransactionStatus  @default(COMPLETED)
+  balanceAfter Int
+  memo         String?
+  approvedBy   String?
+  createdAt    DateTime           @default(now())
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([type, status])
+}
+
+model CreditGrant {
+  id              String            @id @default(cuid())
+  userId          String
+  creditKind      CreditKind
+  amount          Int
+  remainingAmount Int
+  expiresAt       DateTime
+  lastUsedAt      DateTime?
+  status          CreditGrantStatus @default(ACTIVE)
+  source          String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, creditKind, status])
+  @@index([expiresAt, status])
+}
+
+model GenerationJob {
+  id           String         @id @default(cuid())
+  userId       String
+  musicId      String?
+  videoId      String?
+  targetType   JobTargetType
+  jobType      JobType
+  queueStatus  QueueStatus    @default(QUEUED)
+  attemptCount Int            @default(0)
+  payload      Json?
+  result       Json?
+  errorMessage String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  music        Music?         @relation(fields: [musicId], references: [id], onDelete: Cascade)
+  video        Video?         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([queueStatus, jobType])
+  @@index([musicId])
+  @@index([videoId])
+}
