@@ -450,32 +450,21 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
               <div className="flex flex-wrap gap-2">
                 {[
                   { value: "manual", label: "직접 입력" },
-                  { value: "auto", label: "AI 자동 생성", disabled: true },
+                  { value: "auto", label: "AI 자동 생성" },
                 ].map((option) => (
                   <button
                     key={option.value}
                     type="button"
                     onClick={() => {
-                      if (option.disabled) {
-                        setMessage(
-                          "AI 자동 가사 생성은 Suno wrapper 패치가 필요해서 현재는 임시 비활성화되어 있습니다.",
-                        );
-                        return;
-                      }
-
                       setLyricMode(option.value as LyricMode);
                     }}
-                    disabled={Boolean(option.disabled)}
                     className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
                       lyricMode === option.value
                         ? "bg-[var(--accent)] text-white"
-                        : option.disabled
-                          ? "border border-[var(--border)] bg-[#f5f1eb] text-[#a08c7d]"
-                          : "border border-[var(--border)] bg-[#fffdf9] text-[#5a4336]"
-                    } disabled:cursor-not-allowed`}
+                        : "border border-[var(--border)] bg-[#fffdf9] text-[#5a4336]"
+                    }`}
                   >
                     {option.label}
-                    {option.disabled ? " 준비중" : ""}
                   </button>
                 ))}
               </div>

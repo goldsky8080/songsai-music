@@ -159,16 +159,6 @@ export async function POST(request: Request) {
     );
   }
 
-  if (parsed.data.lyricMode === "auto") {
-    return NextResponse.json(
-      {
-        error:
-          "AI 자동 가사 생성은 Suno wrapper 패치가 필요해서 현재는 임시 비활성화되어 있습니다.",
-      },
-      { status: 400 },
-    );
-  }
-
   const provider = getMusicProvider();
   const trackCount = parsed.data.trackCount;
   const requestGroupId = crypto.randomUUID();
