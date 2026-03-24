@@ -1,3 +1,4 @@
+// API 라우트가 provider 계층으로 넘기는 표준 입력 구조.
 export type CreateMusicInput = {
   title: string;
   lyrics: string;
@@ -9,6 +10,7 @@ export type CreateMusicInput = {
   userId: string;
 };
 
+// provider 구현이 공통으로 반환해야 하는 표준 결과 구조.
 export type ProviderMusicResult = {
   providerTaskId: string;
   status: "queued" | "processing" | "completed" | "failed";
@@ -21,6 +23,7 @@ export type ProviderMusicResult = {
   }>;
 };
 
+// 향후 워커/배치 처리로 확장할 때 재사용 가능한 최소 상태 스냅샷 타입.
 export type MusicStatusSnapshot = {
   id: string;
   providerTaskId: string | null;

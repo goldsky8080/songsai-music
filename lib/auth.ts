@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 
 export const AUTH_COOKIE_NAME = "music-platform-session";
 
+// 쿠키 안에 담는 최소 사용자 정보. 민감 데이터는 넣지 않는다.
 export type SessionUser = {
   id: string;
   email: string;
@@ -12,6 +13,10 @@ export type SessionUser = {
 
 const secret = new TextEncoder().encode(env.AUTH_SECRET);
 
+/**
+ * 로그인 성공 시 7일짜리 세션 토큰을 생성한다.
+ * 현재는 단순 JWT 기반이며, 필요 시 이후 refresh/session store 구조로 확장 가능하다.
+ */
 export async function createSessionToken(user: SessionUser) {
   return new SignJWT({
     email: user.email,
@@ -24,6 +29,7 @@ export async function createSessionToken(user: SessionUser) {
     .sign(secret);
 }
 
+// 쿠키 토큰을 검증하고 내부에서 쓰기 쉬운 SessionUser 형태로 다시 만든다.
 export async function verifySessionToken(token: string) {
   const { payload } = await jwtVerify(token, secret);
 
@@ -34,6 +40,7 @@ export async function verifySessionToken(token: string) {
   } satisfies SessionUser;
 }
 
+// 현재 요청의 쿠키에서 세션 사용자를 읽는다. 토큰이 없거나 깨졌으면 null을 반환한다.
 export async function getSessionUser() {
   const cookieStore = await cookies();
   const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;

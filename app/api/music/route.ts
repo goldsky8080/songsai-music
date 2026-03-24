@@ -8,6 +8,7 @@ import { createMusicSchema } from "@/server/music/schema";
 import { syncMusicStatuses } from "@/server/music/service";
 import { MusicStatus, QueueStatus } from "@prisma/client";
 
+// provider 상태 문자열을 MusicStatus enum으로 정규화한다.
 function toDbMusicStatus(status: "queued" | "processing" | "completed" | "failed") {
   switch (status) {
     case "queued":
@@ -23,6 +24,7 @@ function toDbMusicStatus(status: "queued" | "processing" | "completed" | "failed
   }
 }
 
+// GenerationJob은 별도 큐 상태를 가지므로 QueueStatus로 한 번 더 변환한다.
 function toDbQueueStatus(status: "queued" | "processing" | "completed" | "failed") {
   switch (status) {
     case "queued":
@@ -40,6 +42,11 @@ function toDbQueueStatus(status: "queued" | "processing" | "completed" | "failed
 
 type MusicRow = Awaited<ReturnType<typeof db.music.findMany>>[number];
 
+/**
+ * 여러 트랙이 하나의 요청 그룹으로 묶일 때, 카드 전체 상태를 결정한다.
+ * 사용자는 "이번 요청이 아직 처리 중인지 / 끝났는지"를 먼저 보기 때문에
+ * 개별 트랙보다 그룹 상태를 먼저 요약해 내려준다.
+ */
 function summarizeGroupStatus(statuses: MusicStatus[]) {
   if (statuses.some((status) => status === MusicStatus.PROCESSING)) {
     return MusicStatus.PROCESSING;
@@ -64,6 +71,10 @@ function summarizeGroupStatus(statuses: MusicStatus[]) {
   return statuses[0] ?? MusicStatus.QUEUED;
 }
 
+/**
+ * DB에는 트랙 단위로 저장된 Music 레코드를 requestGroupId 기준으로 다시 묶는다.
+ * 프론트는 이 구조를 받아 "한 요청 카드 안에 여러 곡 버튼" UI를 만들 수 있다.
+ */
 function groupMusicItems(musics: MusicRow[]) {
   const groups = new Map<string, MusicRow[]>();
 
@@ -100,12 +111,14 @@ function groupMusicItems(musics: MusicRow[]) {
 }
 
 export async function GET() {
+  // 로그인 사용자만 자신의 생성 이력을 조회할 수 있다.
   const sessionUser = await getSessionUser();
 
   if (!sessionUser) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // 목록 조회 시점에 진행 중 항목 상태를 가볍게 동기화해 최신 결과를 보여준다.
   await syncMusicStatuses(sessionUser.id);
 
   const musics = await db.music.findMany({
@@ -122,6 +135,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // 음악 생성은 반드시 로그인 세션이 있어야 한다.
   const sessionUser = await getSessionUser();
 
   if (!sessionUser) {
@@ -141,6 +155,10 @@ export async function POST(request: Request) {
     );
   }
 
+  /**
+   * 자동 가사 모드는 향후 wrapper 패치 후 재개 예정이다.
+   * 현재는 인증 흐름 문제로 막아 두고, 안내 메시지를 그대로 내려준다.
+   */
   if (parsed.data.lyricMode === "auto") {
     return NextResponse.json(
       {
@@ -156,6 +174,14 @@ export async function POST(request: Request) {
   const requestGroupId = crypto.randomUUID();
   const generationCost = getMusicGenerationCost(trackCount);
 
+  /**
+   * 1단계 트랜잭션:
+   * - 대표 Music 레코드 생성
+   * - 크레딧 선차감
+   * - GenerationJob 기록
+   *
+   * 외부 provider 호출 이전에 내부 원장을 먼저 확보해야 실패 시 환불 처리도 단순해진다.
+   */
   const created = await db.$transaction(async (tx) => {
     const music = await tx.music.create({
       data: {
@@ -219,6 +245,12 @@ export async function POST(request: Request) {
 
     const [primaryTrack, ...extraTracks] = selectedTracks;
 
+    /**
+     * 2단계 트랜잭션:
+     * - 첫 번째 트랙은 기존 대표 레코드에 반영
+     * - 두 번째 트랙이 있으면 추가 Music 레코드 생성
+     * - 각각의 결과를 GenerationJob에도 기록
+     */
     const items = await db.$transaction(async (tx) => {
       const primaryMusic = await tx.music.update({
         where: { id: created.id },
@@ -298,6 +330,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ items: groupMusicItems(items) }, { status: 201 });
   } catch (error) {
+    // 외부 요청 실패 시에는 선차감 크레딧을 환불하고 대표 레코드를 실패 상태로 마감한다.
     const errorMessage =
       error instanceof Error ? error.message : "Music generation request failed.";
 

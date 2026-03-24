@@ -2,6 +2,13 @@
 
 import { useEffect, useState, useTransition } from "react";
 
+/**
+ * 현재 MVP의 메인 화면을 담당하는 클라이언트 컴포넌트.
+ *
+ * 로그인 전에는 인증 화면만 보여주고,
+ * 로그인 후에는 한 화면 안에서 크레딧 현황, 음악 생성 폼, 생성 결과 목록을 모두 다룬다.
+ * 추후 기능이 커지면 분리할 수 있지만, 지금은 빠른 검증을 위해 한 흐름으로 유지한다.
+ */
 type FormMode = "signup" | "login";
 type VocalGender = "auto" | "female" | "male";
 type LyricMode = "manual" | "auto";
@@ -35,6 +42,7 @@ type MusicItem = {
   tracks: MusicTrack[];
 };
 
+// 실패 응답일 때는 서버가 내려준 error 문자열을 그대로 살려 디버깅에 활용한다.
 async function readJson(response: Response) {
   const data = (await response.json()) as Record<string, unknown>;
 
@@ -49,6 +57,7 @@ function formatCredits(value: number) {
   return value.toLocaleString("ko-KR");
 }
 
+// 목록 카드에는 짧은 날짜 형식만 필요하므로 한국어 로캘 기준으로 압축해 표시한다.
 function formatDate(value: string) {
   return new Date(value).toLocaleString("ko-KR", {
     month: "numeric",
@@ -58,6 +67,7 @@ function formatDate(value: string) {
   });
 }
 
+// DB enum 상태를 사용자용 짧은 레이블로 바꾼다.
 function statusLabel(status: MusicItem["status"]) {
   switch (status) {
     case "QUEUED":
@@ -75,6 +85,7 @@ function statusLabel(status: MusicItem["status"]) {
   }
 }
 
+// 상태 칩 색상을 분리해 완료/실패/진행중을 빠르게 구분하도록 한다.
 function statusTone(status: MusicItem["status"]) {
   switch (status) {
     case "COMPLETED":
@@ -93,11 +104,13 @@ function formatCost(trackCount: TrackCount) {
 }
 
 export function AuthPanel() {
+  // 인증 관련 상태
   const [mode, setMode] = useState<FormMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("로그인하면 바로 작업 화면으로 이동합니다.");
   const [user, setUser] = useState<PublicUser | null>(null);
+  // 음악 생성 폼 상태
   const [title, setTitle] = useState("");
   const [lyrics, setLyrics] = useState("");
   const [stylePrompt, setStylePrompt] = useState("");
@@ -109,6 +122,10 @@ export function AuthPanel() {
   const [isPending, startTransition] = useTransition();
   const [isBooting, setIsBooting] = useState(true);
 
+  /**
+   * 현재 로그인된 사용자와 잔액을 읽어온다.
+   * 로그인 직후, 새로고침 직후, 생성 후 잔액 재확인 시 공통 사용된다.
+   */
   async function loadCurrentUser() {
     const response = await fetch("/api/me", {
       method: "GET",
@@ -123,6 +140,10 @@ export function AuthPanel() {
     return data.item;
   }
 
+  /**
+   * 내가 생성한 음악 목록을 읽어온다.
+   * 서버는 이미 requestGroupId 기준으로 묶어서 내려주므로 프론트는 그대로 렌더링한다.
+   */
   async function loadMusicItems() {
     const response = await fetch("/api/music", {
       method: "GET",
@@ -140,6 +161,7 @@ export function AuthPanel() {
   useEffect(() => {
     let isMounted = true;
 
+    // 첫 진입 시 세션 복구와 초기 목록 조회를 함께 처리한다.
     startTransition(async () => {
       try {
         const currentUser = await loadCurrentUser();
@@ -172,6 +194,7 @@ export function AuthPanel() {
       return;
     }
 
+    // 진행 중 항목이 있을 때만 폴링해 불필요한 네트워크 요청을 줄인다.
     const hasPendingMusic = musics.some(
       (item) => item.status === "QUEUED" || item.status === "PROCESSING",
     );
@@ -197,6 +220,10 @@ export function AuthPanel() {
     };
   }, [musics, user]);
 
+  /**
+   * 회원가입/로그인 공통 처리.
+   * 성공 시 사용자 상태를 메모리에 반영해 즉시 대시보드로 전환한다.
+   */
   function submitAuth() {
     startTransition(async () => {
       try {
@@ -225,6 +252,7 @@ export function AuthPanel() {
     });
   }
 
+  // 세션을 종료하고 화면을 초기 상태로 되돌린다.
   function logout() {
     startTransition(async () => {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -236,6 +264,10 @@ export function AuthPanel() {
     });
   }
 
+  /**
+   * 음악 생성 요청의 프론트 진입점.
+   * 과금/DB 생성/provider 호출은 서버가 담당하고, 프론트는 입력 전달과 새로고침만 맡는다.
+   */
   function createMusic() {
     startTransition(async () => {
       try {
@@ -290,6 +322,7 @@ export function AuthPanel() {
   }
 
   if (!user) {
+    // 로그인 전 화면은 최대한 단순하게 유지해 이탈 없이 바로 가입/로그인하도록 유도한다.
     return (
       <section className="flex min-h-screen items-center justify-center px-5 py-8">
         <div className="w-full max-w-sm rounded-[1.9rem] border border-[var(--border)] bg-white/90 p-6 shadow-[0_25px_80px_rgba(90,55,30,0.12)]">
@@ -368,6 +401,14 @@ export function AuthPanel() {
   }
 
   return (
+    /**
+     * 로그인 후 화면 구성 원칙:
+     * - 상단: 사용자/잔액 정보
+     * - 중단: 가장 중요한 생성 폼
+     * - 하단: 최근 생성 결과
+     *
+     * 모바일 우선 사용성을 고려해 세로 흐름을 기본으로 설계했다.
+     */
     <section className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-5 sm:px-5">
       <div className="rounded-[1.6rem] border border-[var(--border)] bg-white/88 p-4 shadow-[0_15px_40px_rgba(90,55,30,0.08)]">
         <div className="flex items-start justify-between gap-3">
