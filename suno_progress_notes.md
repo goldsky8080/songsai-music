@@ -1,79 +1,85 @@
-# Suno Integration Progress Notes
+# Suno Progress Notes
 
 ## 목적
-- 현재 프로젝트에서 Suno 연동 작업이 어디까지 왔는지 기록한다.
-- 나중에 다시 이어서 작업할 때, 모델명/보컬 처리/자동 가사 이슈를 빠르게 복기할 수 있게 한다.
+- 지금까지 진행한 Suno 연동 작업을 한눈에 복기하기 위한 메모
+- 내일 다시 작업할 때 현재 상태, 막힌 이유, 다음 순서를 빠르게 확인하기 위한 문서
 
-## 현재 완료된 것
-- 로그인/회원가입, 세션, 크레딧 구조 구현 완료
-- 음악 생성 폼 구현 완료
-- Suno wrapper(`gcui-art/suno-api`) 연동 완료
-- 생성 비용 차감 및 실패 시 환불 로직 구현 완료
-- Suno가 2개 클립을 반환할 때 목록에 2개가 각각 보이도록 수정 완료
-- 보컬 선택 UI(`자동 / 여성 / 남성`) 추가 완료
+## 현재까지 완료된 것
+- 로그인/회원가입, 세션, 크레딧 구조 구현
+- 무료/유료 크레딧 분리
+- 회원가입 시 무료 크레딧 1000 지급
+- 음악 생성 폼 구현
+- Suno wrapper(`gcui-art/suno-api`) 연동
+- 음악 생성 실패 시 크레딧 환불
+- Suno가 2개 클립을 반환할 때 목록에 각각 반영되도록 처리
+- 같은 생성 요청 결과를 한 카드로 묶어서 보여주는 구조 추가
+- `1곡 / 2곡` 선택 추가
+- 비용 정책 변경
+  - 1곡: 500 크레딧
+  - 2곡: 700 크레딧
+- 보컬 선택 UI 추가
+  - 자동 / 여성 / 남성
+- 모델 선택 UI 추가
+  - `v4.5+`
+  - `v5`
+- 다운로드 API 추가
+  - `/api/music/[id]/download`
 
-## 현재 모델 매핑 메모
+## 확인한 모델 내부명
 - `v4.5+` -> `chirp-bluejay`
 - `v5` -> `chirp-crow`
 
-이 값은 Suno 웹에서 직접 생성한 뒤 DevTools Preview/Payload에서 확인했다.
+이 값은 Suno 웹에서 직접 생성한 뒤 DevTools `Payload` / `Preview`를 보고 확인했다.
 
-## 현재 provider 동작
-- 기본 모델은 현재 `v5` 테스트 기준으로 `chirp-crow` 사용
-- 스타일 문자열에 따라 보컬 힌트를 보강한다
+## 현재 메인 프로젝트 provider 동작
+- 모델 선택값을 받아 내부 Suno 모델명으로 매핑
+- 스타일 문구에 따라 보컬 힌트 강화
   - 여성: `female vocal, female singer`
   - 남성: `male vocal, male singer`
-- `vocalGender` 선택값이 있으면 자동 추정보다 우선한다
+- `vocalGender`를 직접 선택하면 자동 추정보다 우선
+- 현재 AI 자동 가사 생성은 임시 비활성화 상태
 
-## 보컬 성별 관련 메모
-- Suno 웹 payload에서 `vocal_gender: "f"` 값이 보였다
-- 따라서 여성 보컬 제어는 단순 `tags`만이 아니라 `vocal_gender`도 영향을 주는 것으로 보인다
-- 현재 프로젝트에서는 `metadata.vocal_gender`를 함께 보내도록 시도했다
-- 다만 wrapper가 이 값을 실제로 Suno까지 완전하게 전달하는지는 추가 확인이 필요하다
+## AI 자동 가사 생성 상태
+- UI 구조와 API 필드는 만들어둠
+- 하지만 현재는 막아둔 상태
 
-## 자동 가사(AI Lyrics) 관련 상태
-- UI와 API 구조는 만들어 둠
-- 하지만 현재는 **임시 비활성화** 상태
-
-### 왜 막았는가
+### 왜 막아두었는가
 - 직접 가사 입력은 wrapper `/api/custom_generate` 경로를 타기 때문에 정상 동작
 - AI 자동 가사는 `gpt_description_prompt`를 보내기 위해 Suno 본체 API를 직접 호출하는 실험을 했음
-- 이 경우 `{"detail":"Unauthorized"}` 에러가 발생함
+- 그 결과 `Unauthorized`가 발생
 
-### Unauthorized 원인
-- wrapper는 내부적으로 세션 유지, CAPTCHA 토큰, 세션 ID 갱신 등을 수행함
+### 원인
+- wrapper는 내부적으로 세션 유지, CAPTCHA 토큰, session_id 갱신 등을 처리함
 - direct call은 그 과정을 타지 못함
-- 따라서 `AI 자동 가사`는 wrapper 패치 없이 바로 열기 어렵다고 판단함
+- 따라서 wrapper 패치 없이 AI 자동 가사를 여는 건 위험하다고 판단
 
-## gcui-art/suno-api에서 확인한 점
+## wrapper(`gcui-art/suno-api`)에서 확인한 점
 - `DEFAULT_MODEL = 'chirp-v3-5'`
-- `custom_generate` route는 `model`을 받아 내부 `generateSongs()`로 전달
-- `generateSongs()`는 최종적으로 Suno `api/generate/v2/`를 호출
-- 내부 로직상
+- `custom_generate` route는 `model` 값을 받아 내부 `generateSongs()`에 전달
+- `generateSongs()`는 최종적으로 Suno `api/generate/v2/` 호출
+- 현재 내부 구조상
   - custom 모드: `prompt`, `tags`, `title`
   - non-custom 모드: `gpt_description_prompt`
-  로 갈라져 있음
+- 즉 `gpt_description_prompt + title + tags` 조합을 자연스럽게 처리하기 어려움
 
-즉 현재 wrapper 구조는 `gpt_description_prompt + title + tags` 조합을 자연스럽게 처리하기 어렵다.
-
-## 나중에 해야 할 wrapper 패치 방향
-대상 레포:
+## AI 자동 가사 다시 열 때 wrapper 패치 방향
+대상:
 - `gcui-art/suno-api`
 
-주요 수정 위치 후보:
+수정 위치 후보:
 - `src/app/api/custom_generate/route.ts`
 - `src/lib/SunoApi.ts`
 
-### 목표
-- custom generate에서도 `gpt_description_prompt`를 받을 수 있게 하기
-- 즉 아래 조합이 가능하게 만들기
+목표:
+- custom generate에서도 `gpt_description_prompt`를 함께 받을 수 있게 수정
+- 즉 아래 조합이 가능해야 함
   - `title`
   - `tags`
   - `gpt_description_prompt`
   - `mv`
   - `vocal_gender`
 
-### 원하는 payload 형태
+원하는 payload 예시:
 ```json
 {
   "title": "먼저처럼",
@@ -92,27 +98,39 @@
 }
 ```
 
-### wrapper 패치 아이디어
-1. `/api/custom_generate` body에서 `gpt_description_prompt`를 받도록 수정
-2. `generateSongs()`에서 custom 모드일 때도 `gpt_description_prompt`를 payload에 실을 수 있게 분기 추가
-3. `title`, `tags`, `negative_tags`, `mv`, `vocal_gender`를 유지한 채 Suno `generate/v2/`로 보내도록 변경
+패치 아이디어:
+1. `/api/custom_generate` body에서 `gpt_description_prompt` 수신
+2. `generateSongs()`에서 custom 모드여도 `gpt_description_prompt`를 payload에 실을 수 있게 분기 추가
+3. `title`, `tags`, `negative_tags`, `mv`, `vocal_gender` 유지
 
-## 현재 프로젝트에서 막아둔 상태
-- UI: `AI 자동 생성` 버튼 비활성화
-- API: `lyricMode === "auto"` 이면 400과 안내 메시지 반환
+## 현재 가장 큰 문제
+Vercel에 배포한 `suno-api` wrapper에서 Playwright 브라우저 실행파일이 없어 생성 시 실패함
 
-## 다시 열 때 순서 추천
-1. wrapper 레포 패치
-2. patched wrapper를 Vercel 재배포
-3. 로컬 프로젝트에서 `AI 자동 생성` 차단 해제
-4. Suno Preview에서
-   - `gpt_description_prompt`
-   - `major_model_version`
-   - `model_name`
-   - `vocal_gender`
-   를 다시 확인
+대표 에러:
+```txt
+Executable doesn't exist at /var/task/.local-browsers/.../headless_shell
+Looks like Playwright was just installed or updated.
+Please run: npx playwright install
+```
 
-## 참고 메모
-- 2개 생성되는 곡은 현재 목록에 각각 별도 항목으로 보이도록 수정됨
+## 왜 Vercel이 문제라고 판단했는가
+- `get_limit`는 정상 동작
+- 생성 요청에서만 Playwright 경로로 들어가며 실패
+- 경로는 바뀌었지만 실행 파일 없음
+- 즉 wrapper 코드보다 배포 런타임 문제가 핵심
+
+## 현재 판단
+- 메인 앱은 Vercel 유지 가능
+- Suno wrapper는 Vercel보다 Railway/Render 같은 일반 런타임이 더 적합
+- 다음 단계는 wrapper를 Railway로 옮기는 것이 가장 현실적
+
+## 메인 프로젝트 현재 TODO
+1. Suno wrapper를 Railway로 이동
+2. Railway 배포 URL을 메인 프로젝트 `SUNO_API_BASE_URL`에 연결
+3. AI 자동 가사는 wrapper 패치 후 재개
+
+## 참고
 - 제목은 DB 저장 없이 API 요청용으로만 사용 중
 - 보컬 선택도 DB 저장 없이 API 요청용으로만 사용 중
+- 1곡 선택 시 앱에서 첫 번째 트랙만 저장/표시
+- 2곡 선택 시 한 카드 안에 두 트랙 버튼으로 표시
