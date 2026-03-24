@@ -1,0 +1,15 @@
+﻿[Unit]
+Description=Music Platform Docker Compose Stack
+After=docker.service network.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/young/services/music/deploy
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker compose -f docker-compose.n100.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.n100.yml down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

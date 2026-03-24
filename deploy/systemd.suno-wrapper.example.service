@@ -1,0 +1,15 @@
+﻿[Unit]
+Description=Suno Wrapper Next.js Service
+After=network.target
+
+[Service]
+Type=simple
+User=young
+WorkingDirectory=/home/young/services/suno-api
+Environment=PORT=3101
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

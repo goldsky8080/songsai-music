@@ -1,6 +1,4 @@
-version: "3.9"
-
-services:
+﻿services:
   postgres:
     image: postgres:17
     container_name: music-postgres
@@ -27,9 +25,10 @@ services:
       - ./.env.n100
     environment:
       PORT: 3000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:3000:3000"
 
 volumes:
   postgres_data:
-
