@@ -23,6 +23,8 @@ COPY --from=deps /app/prisma ./prisma
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV DATABASE_URL=postgresql://postgres:postgres@localhost:5432/music_platform?schema=public
+ENV AUTH_SECRET=build-only-secret-key-123456
 RUN npm run build
 
 FROM node:22-bookworm-slim AS runner
