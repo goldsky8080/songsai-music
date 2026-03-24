@@ -7,3 +7,4 @@ coverage
 *.log
 generated
 .codex_tmp*
+tsconfig.tsbuildinfo

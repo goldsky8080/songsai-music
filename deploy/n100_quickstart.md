@@ -181,15 +181,26 @@ http://127.0.0.1:3000
 예시 파일:
 
 - [nginx.music-platform.conf.example](/d:/music/deploy/nginx.music-platform.conf.example)
+- [nginx.suno-wrapper.conf.example](/d:/music/deploy/nginx.suno-wrapper.conf.example)
 
 적용 예시:
 
 ```bash
 sudo cp ~/services/music/deploy/nginx.music-platform.conf.example /etc/nginx/sites-available/music-platform
+sudo cp ~/services/music/deploy/nginx.suno-wrapper.conf.example /etc/nginx/sites-available/suno-wrapper
 sudo ln -s /etc/nginx/sites-available/music-platform /etc/nginx/sites-enabled/music-platform
+sudo ln -s /etc/nginx/sites-available/suno-wrapper /etc/nginx/sites-enabled/suno-wrapper
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+권장 공개 구조:
+
+- `songsai.org` -> 메인 앱(`127.0.0.1:3000`)
+- `suno.songsai.org` -> Suno wrapper(`127.0.0.1:3101`)
+
+이렇게 해두면 운영 앱은 내부 주소 `http://host.docker.internal:3101` 을 계속 사용하고,
+로컬 개발 앱은 외부 HTTPS 주소 `https://suno.songsai.org` 를 사용해서 같은 소스를 그대로 테스트할 수 있다.
 
 ## 13. 서버 운영 중 자주 쓰는 명령
 
@@ -286,6 +297,7 @@ sudo systemctl start suno-wrapper
 - wrapper를 `npm run dev` 로 띄운 터미널을 닫으면 실제 음악 생성이 바로 실패할 수 있다.
 - 운영 안정성을 원하면 wrapper는 `npm run build && npm run start` 후 systemd 로 등록하는 것이 좋다.
 - 외부 공개는 `3000`, `3101`, `5432` 를 직접 열기보다 `80`, `443` 만 Nginx 로 여는 것이 안전하다.
+- 로컬 개발 앱이 실제 운영 wrapper 를 쓰려면 `suno.songsai.org` 같은 별도 공개 주소가 필요하다.
 
 ## 16. 사용자가 늘었을 때 확장 순서
 
@@ -312,5 +324,5 @@ sudo systemctl start suno-wrapper
 - Prisma 마이그레이션 성공
 - Suno wrapper 3101 포트 응답 성공
 - 메인 앱과 wrapper 연결 성공
-
-이제 실제 브라우저에서 로그인 후 음악 생성 테스트만 하면 된다.
+- `songsai.org` 메인 앱 공개 성공
+- `suno.songsai.org` 같은 wrapper 공개 구조를 추가하면 로컬 개발에서도 같은 소스로 실제 생성 테스트 가능

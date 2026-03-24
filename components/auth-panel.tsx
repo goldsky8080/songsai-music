@@ -1,14 +1,8 @@
-"use client";
+﻿"use client";
 
+import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 
-/**
- * 현재 MVP의 메인 화면을 담당하는 클라이언트 컴포넌트.
- *
- * 로그인 전에는 인증 화면만 보여주고,
- * 로그인 후에는 한 화면 안에서 크레딧 현황, 음악 생성 폼, 생성 결과 목록을 모두 다룬다.
- * 추후 기능이 커지면 분리할 수 있지만, 지금은 빠른 검증을 위해 한 흐름으로 유지한다.
- */
 type FormMode = "signup" | "login";
 type VocalGender = "auto" | "female" | "male";
 type LyricMode = "manual" | "auto";
@@ -42,7 +36,10 @@ type MusicItem = {
   tracks: MusicTrack[];
 };
 
-// 실패 응답일 때는 서버가 내려준 error 문자열을 그대로 살려 디버깅에 활용한다.
+type AuthPanelProps = {
+  showAllMusicList?: boolean;
+};
+
 async function readJson(response: Response) {
   const data = (await response.json()) as Record<string, unknown>;
 
@@ -57,7 +54,6 @@ function formatCredits(value: number) {
   return value.toLocaleString("ko-KR");
 }
 
-// 목록 카드에는 짧은 날짜 형식만 필요하므로 한국어 로캘 기준으로 압축해 표시한다.
 function formatDate(value: string) {
   return new Date(value).toLocaleString("ko-KR", {
     month: "numeric",
@@ -67,7 +63,6 @@ function formatDate(value: string) {
   });
 }
 
-// DB enum 상태를 사용자용 짧은 레이블로 바꾼다.
 function statusLabel(status: MusicItem["status"]) {
   switch (status) {
     case "QUEUED":
@@ -85,7 +80,6 @@ function statusLabel(status: MusicItem["status"]) {
   }
 }
 
-// 상태 칩 색상을 분리해 완료/실패/진행중을 빠르게 구분하도록 한다.
 function statusTone(status: MusicItem["status"]) {
   switch (status) {
     case "COMPLETED":
@@ -103,14 +97,17 @@ function formatCost(trackCount: TrackCount) {
   return trackCount === 2 ? "700" : "500";
 }
 
-export function AuthPanel() {
-  // 인증 관련 상태
+function summarizeMusicLabel(item: MusicItem) {
+  const base = item.title?.trim() || item.lyrics.replace(/\s+/g, " ").trim();
+  return base.length > 34 ? `${base.slice(0, 34)}...` : base;
+}
+
+export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
   const [mode, setMode] = useState<FormMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("로그인하면 바로 작업 화면으로 이동합니다.");
   const [user, setUser] = useState<PublicUser | null>(null);
-  // 음악 생성 폼 상태
   const [title, setTitle] = useState("");
   const [lyrics, setLyrics] = useState("");
   const [stylePrompt, setStylePrompt] = useState("");
@@ -122,10 +119,6 @@ export function AuthPanel() {
   const [isPending, startTransition] = useTransition();
   const [isBooting, setIsBooting] = useState(true);
 
-  /**
-   * 현재 로그인된 사용자와 잔액을 읽어온다.
-   * 로그인 직후, 새로고침 직후, 생성 후 잔액 재확인 시 공통 사용된다.
-   */
   async function loadCurrentUser() {
     const response = await fetch("/api/me", {
       method: "GET",
@@ -140,10 +133,6 @@ export function AuthPanel() {
     return data.item;
   }
 
-  /**
-   * 내가 생성한 음악 목록을 읽어온다.
-   * 서버는 이미 requestGroupId 기준으로 묶어서 내려주므로 프론트는 그대로 렌더링한다.
-   */
   async function loadMusicItems() {
     const response = await fetch("/api/music", {
       method: "GET",
@@ -161,7 +150,6 @@ export function AuthPanel() {
   useEffect(() => {
     let isMounted = true;
 
-    // 첫 진입 시 세션 복구와 초기 목록 조회를 함께 처리한다.
     startTransition(async () => {
       try {
         const currentUser = await loadCurrentUser();
@@ -194,7 +182,6 @@ export function AuthPanel() {
       return;
     }
 
-    // 진행 중 항목이 있을 때만 폴링해 불필요한 네트워크 요청을 줄인다.
     const hasPendingMusic = musics.some(
       (item) => item.status === "QUEUED" || item.status === "PROCESSING",
     );
@@ -220,10 +207,6 @@ export function AuthPanel() {
     };
   }, [musics, user]);
 
-  /**
-   * 회원가입/로그인 공통 처리.
-   * 성공 시 사용자 상태를 메모리에 반영해 즉시 대시보드로 전환한다.
-   */
   function submitAuth() {
     startTransition(async () => {
       try {
@@ -242,8 +225,8 @@ export function AuthPanel() {
         setPassword("");
         setMessage(
           mode === "signup"
-            ? "회원가입이 완료됐습니다. 무료 크레딧 1,000이 지급되었습니다."
-            : "로그인이 완료되었습니다.",
+            ? "회원가입이 완료됐습니다. 무료 크레딧 1,000이 지급됐습니다."
+            : "로그인이 완료됐습니다.",
         );
         await loadMusicItems();
       } catch (error) {
@@ -252,7 +235,6 @@ export function AuthPanel() {
     });
   }
 
-  // 세션을 종료하고 화면을 초기 상태로 되돌린다.
   function logout() {
     startTransition(async () => {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -260,14 +242,10 @@ export function AuthPanel() {
       setMusics([]);
       setPassword("");
       setMode("login");
-      setMessage("로그아웃되었습니다.");
+      setMessage("로그아웃했습니다.");
     });
   }
 
-  /**
-   * 음악 생성 요청의 프론트 진입점.
-   * 과금/DB 생성/provider 호출은 서버가 담당하고, 프론트는 입력 전달과 새로고침만 맡는다.
-   */
   function createMusic() {
     startTransition(async () => {
       try {
@@ -301,12 +279,15 @@ export function AuthPanel() {
         setVocalGender("auto");
         setTrackCount(2);
         setModelVersion("v5");
-        setMessage("음악 생성 요청이 등록되었습니다.");
+        setMessage("음악 생성 요청을 등록했습니다.");
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "음악 생성 요청에 실패했습니다.");
       }
     });
   }
+
+  const visibleMusics = musics.filter((item) => item.status !== "FAILED");
+  const recentMusics = showAllMusicList ? visibleMusics : visibleMusics.slice(0, 3);
 
   if (isBooting) {
     return (
@@ -322,7 +303,6 @@ export function AuthPanel() {
   }
 
   if (!user) {
-    // 로그인 전 화면은 최대한 단순하게 유지해 이탈 없이 바로 가입/로그인하도록 유도한다.
     return (
       <section className="flex min-h-screen items-center justify-center px-5 py-8">
         <div className="w-full max-w-sm rounded-[1.9rem] border border-[var(--border)] bg-white/90 p-6 shadow-[0_25px_80px_rgba(90,55,30,0.12)]">
@@ -330,10 +310,10 @@ export function AuthPanel() {
             AI Trot Studio
           </p>
           <h1 className="mt-4 text-[1.9rem] font-semibold leading-tight text-[#2d2018]">
-            로그인 후 바로 음악 작업을 시작하세요
+            로그인하고 바로 음악 작업을 시작하세요
           </h1>
           <p className="mt-4 text-sm leading-7 text-[#6b5648]">
-            회원가입 시 무료 크레딧 1,000이 즉시 지급됩니다. 무료 30일, 유료 60일 정책이
+            회원가입하면 무료 크레딧 1,000이 즉시 지급됩니다. 무료 30일, 유료 60일 정책은
             자동 적용됩니다.
           </p>
 
@@ -389,7 +369,7 @@ export function AuthPanel() {
             disabled={isPending}
             className="mt-6 w-full rounded-2xl bg-[var(--accent)] px-5 py-4 text-base font-semibold text-white disabled:opacity-60"
           >
-            {isPending ? "처리 중..." : mode === "signup" ? "회원가입 후 시작하기" : "로그인하기"}
+            {isPending ? "처리 중..." : mode === "signup" ? "회원가입하고 시작하기" : "로그인하기"}
           </button>
 
           <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[#fffaf4] p-4">
@@ -401,20 +381,12 @@ export function AuthPanel() {
   }
 
   return (
-    /**
-     * 로그인 후 화면 구성 원칙:
-     * - 상단: 사용자/잔액 정보
-     * - 중단: 가장 중요한 생성 폼
-     * - 하단: 최근 생성 결과
-     *
-     * 모바일 우선 사용성을 고려해 세로 흐름을 기본으로 설계했다.
-     */
     <section className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-5 sm:px-5">
       <div className="rounded-[1.6rem] border border-[var(--border)] bg-white/88 p-4 shadow-[0_15px_40px_rgba(90,55,30,0.08)]">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-[#5a4336]">{user.email}</p>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-[#f4efe8] px-3 py-1 text-xs font-semibold text-[#5d493e]">
                 총 {formatCredits(user.totalCredits)}
               </span>
@@ -424,6 +396,12 @@ export function AuthPanel() {
               <span className="rounded-full bg-[#fff0eb] px-3 py-1 text-xs font-semibold text-[#b64822]">
                 유료 {formatCredits(user.paidCredits)}
               </span>
+              <Link
+                href="/credits"
+                className="rounded-full border border-[var(--border)] bg-[#fffdf9] px-3 py-1 text-[11px] font-semibold text-[var(--accent)]"
+              >
+                크레딧 충전
+              </Link>
             </div>
           </div>
           <button
@@ -437,190 +415,197 @@ export function AuthPanel() {
         </div>
       </div>
 
-      <div className="mt-4 rounded-[1.8rem] border border-[var(--border)] bg-white/92 p-5 shadow-[0_18px_50px_rgba(90,55,30,0.1)]">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">
-              Music Create
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold text-[#2d2018]">음악 생성 입력</h2>
+      {!showAllMusicList ? (
+        <div className="mt-4 rounded-[1.8rem] border border-[var(--border)] bg-white/92 p-5 shadow-[0_18px_50px_rgba(90,55,30,0.1)]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">
+                Music Create
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-[#2d2018]">음악 생성 입력</h2>
+            </div>
+            <span className="rounded-full bg-[#fff6e6] px-3 py-1 text-xs font-semibold text-[#9a5b09]">
+              {trackCount}곡 · {formatCost(trackCount)}크레딧
+            </span>
           </div>
-          <span className="rounded-full bg-[#fff6e6] px-3 py-1 text-xs font-semibold text-[#9a5b09]">
-            1차 MVP
-          </span>
-        </div>
 
-        <p className="mt-3 text-sm leading-7 text-[#6b5648]">
-          제목, 가사, 스타일을 넣고 모델과 곡 수를 선택하면 생성 요청이 등록됩니다.
-        </p>
+          <p className="mt-3 text-sm leading-7 text-[#6b5648]">
+            제목, 가사, 스타일을 넣고 모델과 곡 수를 선택하면 생성 요청이 등록됩니다.
+          </p>
 
-        <div className="mt-5 grid gap-4">
-          <label className="grid gap-2 text-sm font-medium text-[#3b2a20]">
-            제목
-            <input
-              type="text"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="예: 당신을 만나지 어제 같은데"
-              className="rounded-[1.2rem] border border-[var(--border)] bg-[#fffdf9] px-4 py-3 text-base outline-none transition focus:border-[var(--accent)]"
-            />
-          </label>
+          <div className="mt-5 grid gap-4">
+            <label className="grid gap-2 text-sm font-medium text-[#3b2a20]">
+              제목
+              <input
+                type="text"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="예: 당신을 만나지 어제 같은데"
+                className="rounded-[1.2rem] border border-[var(--border)] bg-[#fffdf9] px-4 py-3 text-base outline-none transition focus:border-[var(--accent)]"
+              />
+            </label>
 
-          <div className="grid gap-2 text-sm font-medium text-[#3b2a20]">
-            <span>가사 모드</span>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { value: "manual", label: "직접 입력" },
-                { value: "auto", label: "AI 자동 생성", disabled: true },
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => {
-                    if (option.disabled) {
-                      setMessage(
-                        "AI 자동 가사 생성은 Suno wrapper 패치가 필요해서 현재는 잠시 비활성화되어 있습니다.",
-                      );
-                      return;
-                    }
+            <div className="grid gap-2 text-sm font-medium text-[#3b2a20]">
+              <span>가사 모드</span>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { value: "manual", label: "직접 입력" },
+                  { value: "auto", label: "AI 자동 생성", disabled: true },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      if (option.disabled) {
+                        setMessage(
+                          "AI 자동 가사 생성은 Suno wrapper 패치가 필요해서 현재는 임시 비활성화되어 있습니다.",
+                        );
+                        return;
+                      }
 
-                    setLyricMode(option.value as LyricMode);
-                  }}
-                  disabled={Boolean(option.disabled)}
-                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                    lyricMode === option.value
-                      ? "bg-[var(--accent)] text-white"
-                      : option.disabled
-                        ? "border border-[var(--border)] bg-[#f5f1eb] text-[#a08c7d]"
+                      setLyricMode(option.value as LyricMode);
+                    }}
+                    disabled={Boolean(option.disabled)}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      lyricMode === option.value
+                        ? "bg-[var(--accent)] text-white"
+                        : option.disabled
+                          ? "border border-[var(--border)] bg-[#f5f1eb] text-[#a08c7d]"
+                          : "border border-[var(--border)] bg-[#fffdf9] text-[#5a4336]"
+                    } disabled:cursor-not-allowed`}
+                  >
+                    {option.label}
+                    {option.disabled ? " 준비중" : ""}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <label className="grid gap-2 text-sm font-medium text-[#3b2a20]">
+              {lyricMode === "manual" ? "가사" : "가사 아이디어"}
+              <textarea
+                value={lyrics}
+                onChange={(event) => setLyrics(event.target.value)}
+                placeholder={
+                  lyricMode === "manual"
+                    ? "예: 바람이 차가운 저녁이 오면..."
+                    : "예: 고향을 그리워하는 중년 여성의 애틋한 트로트 가사를 만들어줘"
+                }
+                rows={7}
+                className="min-h-[170px] rounded-[1.4rem] border border-[var(--border)] bg-[#fffdf9] px-4 py-4 text-base leading-7 outline-none transition focus:border-[var(--accent)]"
+              />
+              <span className="text-xs text-[#8a7465]">{lyrics.length}자</span>
+            </label>
+
+            <label className="grid gap-2 text-sm font-medium text-[#3b2a20]">
+              스타일
+              <input
+                type="text"
+                value={stylePrompt}
+                onChange={(event) => setStylePrompt(event.target.value)}
+                placeholder="예: 신비롭고 애절한 분위기, 여성보컬"
+                className="rounded-[1.2rem] border border-[var(--border)] bg-[#fffdf9] px-4 py-3 text-base outline-none transition focus:border-[var(--accent)]"
+              />
+            </label>
+
+            <div className="grid gap-2 text-sm font-medium text-[#3b2a20]">
+              <span>모델 버전</span>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  {
+                    value: "v4_5_plus" as ModelVersion,
+                    label: "블루",
+                    activeClass: "bg-[#1f5fbf] text-white border-[#1f5fbf]",
+                    idleClass: "border border-[#bfd7ff] bg-[#eef5ff] text-[#1f5fbf]",
+                  },
+                  {
+                    value: "v5" as ModelVersion,
+                    label: "레드",
+                    activeClass: "bg-[#b64822] text-white border-[#b64822]",
+                    idleClass: "border border-[#f0c3b4] bg-[#fff1eb] text-[#b64822]",
+                  },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setModelVersion(option.value)}
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                      modelVersion === option.value ? option.activeClass : option.idleClass
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-2 text-sm font-medium text-[#3b2a20]">
+              <span>보컬</span>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { value: "auto", label: "자동" },
+                  { value: "female", label: "여성" },
+                  { value: "male", label: "남성" },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setVocalGender(option.value as VocalGender)}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      vocalGender === option.value
+                        ? "bg-[var(--accent)] text-white"
                         : "border border-[var(--border)] bg-[#fffdf9] text-[#5a4336]"
-                  } disabled:cursor-not-allowed`}
-                >
-                  {option.label}
-                  {option.disabled ? " · 준비중" : ""}
-                </button>
-              ))}
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-2 text-sm font-medium text-[#3b2a20]">
+              <span>생성 곡 수</span>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { value: 1 as TrackCount, label: "1곡", cost: "500크레딧" },
+                  { value: 2 as TrackCount, label: "2곡", cost: "700크레딧" },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setTrackCount(option.value)}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      trackCount === option.value
+                        ? "bg-[var(--accent)] text-white"
+                        : "border border-[var(--border)] bg-[#fffdf9] text-[#5a4336]"
+                    }`}
+                  >
+                    {option.label} · {option.cost}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
-          <label className="grid gap-2 text-sm font-medium text-[#3b2a20]">
-            {lyricMode === "manual" ? "가사" : "가사 아이디어"}
-            <textarea
-              value={lyrics}
-              onChange={(event) => setLyrics(event.target.value)}
-              placeholder={
-                lyricMode === "manual"
-                  ? "예: 사랑은 바람처럼 왔다가 내 가슴에 꽃을 피우네"
-                  : "예: 고향을 그리워하는 중년 여성의 애틋한 트로트 가사를 만들어줘"
-              }
-              rows={7}
-              className="min-h-[170px] rounded-[1.4rem] border border-[var(--border)] bg-[#fffdf9] px-4 py-4 text-base leading-7 outline-none transition focus:border-[var(--accent)]"
-            />
-            <span className="text-xs text-[#8a7465]">{lyrics.length}자</span>
-          </label>
+          <button
+            type="button"
+            onClick={createMusic}
+            disabled={
+              isPending ||
+              title.trim().length < 1 ||
+              lyrics.trim().length < 10 ||
+              stylePrompt.trim().length < 2
+            }
+            className="mt-5 w-full rounded-[1.3rem] bg-[var(--accent)] px-5 py-4 text-base font-semibold text-white shadow-[0_14px_30px_rgba(182,72,34,0.22)] disabled:opacity-60"
+          >
+            {isPending ? "처리 중..." : "음악 생성 요청하기"}
+          </button>
 
-          <label className="grid gap-2 text-sm font-medium text-[#3b2a20]">
-            스타일
-            <input
-              type="text"
-              value={stylePrompt}
-              onChange={(event) => setStylePrompt(event.target.value)}
-              placeholder="예: 한국 트로트, 여성보컬, 따뜻한 분위기"
-              className="rounded-[1.2rem] border border-[var(--border)] bg-[#fffdf9] px-4 py-3 text-base outline-none transition focus:border-[var(--accent)]"
-            />
-          </label>
-
-          <div className="grid gap-2 text-sm font-medium text-[#3b2a20]">
-            <span>모델 버전</span>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { value: "v4_5_plus" as ModelVersion, label: "v4.5+" },
-                { value: "v5" as ModelVersion, label: "v5" },
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setModelVersion(option.value)}
-                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                    modelVersion === option.value
-                      ? "bg-[var(--accent)] text-white"
-                      : "border border-[var(--border)] bg-[#fffdf9] text-[#5a4336]"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-2 text-sm font-medium text-[#3b2a20]">
-            <span>보컬</span>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { value: "auto", label: "자동" },
-                { value: "female", label: "여성" },
-                { value: "male", label: "남성" },
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setVocalGender(option.value as VocalGender)}
-                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                    vocalGender === option.value
-                      ? "bg-[var(--accent)] text-white"
-                      : "border border-[var(--border)] bg-[#fffdf9] text-[#5a4336]"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-2 text-sm font-medium text-[#3b2a20]">
-            <span>생성 곡 수</span>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { value: 1 as TrackCount, label: "1곡", cost: "500크레딧" },
-                { value: 2 as TrackCount, label: "2곡", cost: "700크레딧" },
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setTrackCount(option.value)}
-                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                    trackCount === option.value
-                      ? "bg-[var(--accent)] text-white"
-                      : "border border-[var(--border)] bg-[#fffdf9] text-[#5a4336]"
-                  }`}
-                >
-                  {option.label} · {option.cost}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs leading-6 text-[#8a7465]">
-              현재 선택: {trackCount}곡 / {formatCost(trackCount)}크레딧 차감
-            </p>
+          <div className="mt-4 rounded-[1.2rem] border border-[var(--border)] bg-[#fffaf4] px-4 py-3">
+            <p className="text-sm leading-7 text-[#6b5648]">{message}</p>
           </div>
         </div>
-
-        <button
-          type="button"
-          onClick={createMusic}
-          disabled={
-            isPending ||
-            title.trim().length < 1 ||
-            lyrics.trim().length < 10 ||
-            stylePrompt.trim().length < 2
-          }
-          className="mt-5 w-full rounded-[1.3rem] bg-[var(--accent)] px-5 py-4 text-base font-semibold text-white shadow-[0_14px_30px_rgba(182,72,34,0.22)] disabled:opacity-60"
-        >
-          {isPending ? "처리 중..." : "음악 생성 요청하기"}
-        </button>
-
-        <div className="mt-4 rounded-[1.2rem] border border-[var(--border)] bg-[#fffaf4] px-4 py-3">
-          <p className="text-sm leading-7 text-[#6b5648]">{message}</p>
-        </div>
-      </div>
+      ) : null}
 
       <div className="mt-4 rounded-[1.6rem] border border-[var(--border)] bg-white/88 p-4 shadow-[0_15px_40px_rgba(90,55,30,0.08)]">
         <div className="flex items-center justify-between gap-3">
@@ -628,24 +613,37 @@ export function AuthPanel() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">
               My Music
             </p>
-            <h2 className="mt-2 text-lg font-semibold text-[#2d2018]">내가 생성한 음악</h2>
+            <h2 className="mt-2 text-lg font-semibold text-[#2d2018]">
+              {showAllMusicList ? "전체 음악 리스트" : "최근 생성 음악"}
+            </h2>
           </div>
-          <span className="text-xs text-[#7a6558]">{musics.length}건</span>
+          {!showAllMusicList && visibleMusics.length > 3 ? (
+            <Link
+              href="/music-history"
+              className="rounded-full border border-[var(--border)] bg-[#fffdf9] px-3 py-2 text-xs font-semibold text-[#5a4336]"
+            >
+              전체 보기
+            </Link>
+          ) : (
+            <span className="text-xs text-[#7a6558]">{visibleMusics.length}건</span>
+          )}
         </div>
 
         <div className="mt-4 space-y-2">
-          {musics.length === 0 ? (
+          {recentMusics.length === 0 ? (
             <div className="rounded-[1.2rem] border border-dashed border-[var(--border)] bg-[#fffaf4] p-4 text-sm leading-7 text-[#6b5648]">
-              아직 생성한 음악이 없습니다. 위 입력 폼에서 첫 요청을 등록해보세요.
+              {showAllMusicList
+                ? "표시할 완료/진행 중 음악이 없습니다."
+                : "최근 생성한 음악이 없습니다. 아래 입력 폼에서 첫 요청을 등록해보세요."}
             </div>
           ) : (
-            musics.map((music) => (
+            recentMusics.map((music) => (
               <article
                 key={music.id}
                 className="rounded-[1rem] border border-[var(--border)] bg-[#fffdf9] px-3 py-3"
               >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0 flex-1">
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0 lg:flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-[11px] text-[#8a7465]">{formatDate(music.createdAt)}</p>
                       <span
@@ -657,15 +655,11 @@ export function AuthPanel() {
                       </span>
                       <span className="text-[11px] text-[#8a7465]">{music.tracks.length}곡</span>
                     </div>
-                    <p className="mt-1 truncate text-sm font-medium text-[#3f2f25]">
-                      {music.lyrics.replace(/\s+/g, " ").trim()}
-                    </p>
-                    <p className="mt-1 truncate text-[11px] text-[#8a7465]">
-                      스타일: {music.stylePrompt}
-                    </p>
+                    <p className="mt-1 text-sm font-medium text-[#3f2f25]">{summarizeMusicLabel(music)}</p>
+                    <p className="mt-1 text-[11px] text-[#8a7465]">스타일 · {music.stylePrompt}</p>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 lg:justify-end">
                     {music.tracks.map((track, index) =>
                       track.mp3Url ? (
                         <div key={track.id} className="flex gap-2">
@@ -695,10 +689,6 @@ export function AuthPanel() {
                     )}
                   </div>
                 </div>
-
-                {music.errorMessage ? (
-                  <p className="mt-2 text-[11px] text-[#b64822]">{music.errorMessage}</p>
-                ) : null}
               </article>
             ))
           )}
