@@ -1,5 +1,5 @@
 ﻿[Unit]
-Description=Suno Wrapper Next.js Service
+Description=SONGS API Wrapper Next.js Service
 After=network.target
 
 [Service]

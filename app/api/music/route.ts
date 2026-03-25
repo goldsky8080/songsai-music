@@ -195,7 +195,7 @@ export async function POST(request: Request) {
           requestGroupId,
           lyrics: parsed.data.lyrics,
           stylePrompt: parsed.data.stylePrompt,
-          provider: "SUNO",
+          provider: "SONGS",
           status: "QUEUED",
         },
       });
@@ -292,7 +292,7 @@ export async function POST(request: Request) {
               requestGroupId,
               lyrics: parsed.data.lyrics,
               stylePrompt: parsed.data.stylePrompt,
-              provider: "SUNO",
+              provider: "SONGS",
               providerTaskId: track.providerTaskId,
               isBonusTrack: true,
               status: toDbMusicStatus(track.status),
@@ -365,3 +365,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: errorMessage }, { status: 502 });
   }
 }
+

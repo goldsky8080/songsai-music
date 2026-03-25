@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 
 export async function GET() {
   const mode = env.MUSIC_PROVIDER_MODE;
-  const isConfigured = Boolean(env.SUNO_API_BASE_URL);
+  const isConfigured = Boolean(env.SONGS_API_BASE_URL);
 
-  if (mode !== "suno") {
+  if (mode !== "songs") {
     return NextResponse.json({
       mode,
       ok: true,
@@ -14,23 +14,23 @@ export async function GET() {
     });
   }
 
-  if (!env.SUNO_API_BASE_URL) {
+  if (!env.SONGS_API_BASE_URL) {
     return NextResponse.json(
       {
         mode,
         ok: false,
         configured: false,
-        message: "SUNO_API_BASE_URL is missing.",
+        message: "SONGS_API_BASE_URL is missing.",
       },
       { status: 500 },
     );
   }
 
   try {
-    const response = await fetch(`${env.SUNO_API_BASE_URL}/api/get_limit`, {
-      headers: env.SUNO_COOKIE
+    const response = await fetch(`${env.SONGS_API_BASE_URL}/api/get_limit`, {
+      headers: env.SONGS_COOKIE
         ? {
-            Cookie: env.SUNO_COOKIE,
+            Cookie: env.SONGS_COOKIE,
           }
         : undefined,
     });
@@ -41,7 +41,7 @@ export async function GET() {
           mode,
           ok: false,
           configured: true,
-          message: "Suno wrapper responded with an error.",
+          message: "SONGS API wrapper responded with an error.",
           status: response.status,
         },
         { status: 502 },
@@ -63,7 +63,7 @@ export async function GET() {
         ok: false,
         configured: true,
         message:
-          error instanceof Error ? error.message : "Failed to reach Suno wrapper.",
+          error instanceof Error ? error.message : "Failed to reach SONGS API wrapper.",
       },
       { status: 502 },
     );
