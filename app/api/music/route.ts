@@ -3,7 +3,12 @@ import { MusicStatus, QueueStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { consumeMusicGenerationCredits, refundMusicGenerationCredits } from "@/server/credits/service";
-import { getMusicGenerationCost } from "@/server/music/constants";
+import {
+  ADDITIONAL_TRACK_UNLOCK_COST,
+  BONUS_TRACK_UNLOCK_WINDOW_DAYS,
+  DOWNLOAD_DELAY_MS,
+  getMusicGenerationCost,
+} from "@/server/music/constants";
 import { getMusicProvider } from "@/server/music/provider";
 import { createMusicSchema } from "@/server/music/schema";
 import { syncMusicStatuses } from "@/server/music/service";
@@ -39,6 +44,8 @@ function toDbQueueStatus(status: "queued" | "processing" | "completed" | "failed
 }
 
 type MusicRow = Awaited<ReturnType<typeof db.music.findMany>>[number];
+
+const BONUS_TRACK_UNLOCK_WINDOW_MS = BONUS_TRACK_UNLOCK_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
 function summarizeGroupStatus(statuses: MusicStatus[]) {
   if (statuses.some((status) => status === MusicStatus.PROCESSING)) {
@@ -80,6 +87,15 @@ function groupMusicItems(musics: MusicRow[]) {
       const first = sortedTracks[0];
       const statuses = sortedTracks.map((track) => track.status);
       const errorMessage = sortedTracks.find((track) => track.errorMessage)?.errorMessage ?? null;
+      const hiddenBonusTracks = sortedTracks.filter(
+        (track) => track.isBonusTrack && !track.bonusUnlockedAt,
+      );
+      const visibleTracks = sortedTracks.filter(
+        (track) => !track.isBonusTrack || Boolean(track.bonusUnlockedAt),
+      );
+      const bonusUnlockExpiresAt = new Date(first.createdAt.getTime() + BONUS_TRACK_UNLOCK_WINDOW_MS);
+      const canUnlockBonusTrack =
+        hiddenBonusTracks.length > 0 && bonusUnlockExpiresAt.getTime() > Date.now();
 
       return {
         id: groupId,
@@ -89,11 +105,16 @@ function groupMusicItems(musics: MusicRow[]) {
         status: summarizeGroupStatus(statuses),
         createdAt: first.createdAt,
         errorMessage,
-        tracks: sortedTracks.map((track) => ({
+        tracks: visibleTracks.map((track) => ({
           id: track.id,
           status: track.status,
           mp3Url: track.mp3Url,
+          downloadAvailableAt: new Date(track.updatedAt.getTime() + DOWNLOAD_DELAY_MS),
         })),
+        hiddenBonusTrackCount: hiddenBonusTracks.length,
+        canUnlockBonusTrack,
+        bonusUnlockExpiresAt: hiddenBonusTracks.length > 0 ? bonusUnlockExpiresAt : null,
+        bonusUnlockCost: hiddenBonusTracks.length > 0 ? ADDITIONAL_TRACK_UNLOCK_COST : 0,
       };
     })
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -160,46 +181,55 @@ export async function POST(request: Request) {
   }
 
   const provider = getMusicProvider();
-  const trackCount = parsed.data.trackCount;
+  const trackCount = 1 as const;
   const requestGroupId = crypto.randomUUID();
   const generationCost = getMusicGenerationCost(trackCount);
 
-  const created = await db.$transaction(async (tx) => {
-    const music = await tx.music.create({
-      data: {
-        userId: sessionUser.id,
-        requestGroupId,
-        lyrics: parsed.data.lyrics,
-        stylePrompt: parsed.data.stylePrompt,
-        provider: "SUNO",
-        status: "QUEUED",
-      },
-    });
+  let created;
 
-    await consumeMusicGenerationCredits(sessionUser.id, music.id, trackCount, tx);
-
-    await tx.generationJob.create({
-      data: {
-        userId: sessionUser.id,
-        musicId: music.id,
-        targetType: "MUSIC",
-        jobType: "MUSIC_GENERATION",
-        queueStatus: "QUEUED",
-        payload: {
-          title: parsed.data.title,
+  try {
+    created = await db.$transaction(async (tx) => {
+      const music = await tx.music.create({
+        data: {
+          userId: sessionUser.id,
+          requestGroupId,
           lyrics: parsed.data.lyrics,
           stylePrompt: parsed.data.stylePrompt,
-          lyricMode: parsed.data.lyricMode,
-          vocalGender: parsed.data.vocalGender,
-          trackCount,
-          modelVersion: parsed.data.modelVersion,
-          cost: generationCost,
+          provider: "SUNO",
+          status: "QUEUED",
         },
-      },
-    });
+      });
 
-    return music;
-  });
+      await consumeMusicGenerationCredits(sessionUser.id, music.id, trackCount, tx);
+
+      await tx.generationJob.create({
+        data: {
+          userId: sessionUser.id,
+          musicId: music.id,
+          targetType: "MUSIC",
+          jobType: "MUSIC_GENERATION",
+          queueStatus: "QUEUED",
+          payload: {
+            title: parsed.data.title,
+            lyrics: parsed.data.lyrics,
+            stylePrompt: parsed.data.stylePrompt,
+            lyricMode: parsed.data.lyricMode,
+            vocalGender: parsed.data.vocalGender,
+            trackCount,
+            modelVersion: parsed.data.modelVersion,
+            cost: generationCost,
+          },
+        },
+      });
+
+      return music;
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Music generation request failed.";
+    const status = errorMessage.includes("크레딧이 부족") ? 402 : 500;
+    return NextResponse.json({ error: errorMessage }, { status });
+  }
 
   try {
     const providerResult = await provider.createMusic({
@@ -223,7 +253,7 @@ export async function POST(request: Request) {
             },
           ];
 
-    const selectedTracks = tracks.slice(0, trackCount);
+    const selectedTracks = tracks.slice(0, 2);
 
     const [primaryTrack, ...extraTracks] = selectedTracks;
 
@@ -264,6 +294,7 @@ export async function POST(request: Request) {
               stylePrompt: parsed.data.stylePrompt,
               provider: "SUNO",
               providerTaskId: track.providerTaskId,
+              isBonusTrack: true,
               status: toDbMusicStatus(track.status),
               mp3Url: track.mp3Url ?? null,
               errorMessage: providerResult.errorMessage ?? null,
@@ -283,10 +314,10 @@ export async function POST(request: Request) {
                 stylePrompt: parsed.data.stylePrompt,
                 lyricMode: parsed.data.lyricMode,
                 vocalGender: parsed.data.vocalGender,
-                trackCount,
+                trackCount: 1,
                 modelVersion: parsed.data.modelVersion,
                 cost: 0,
-                source: "provider-duplicate-track",
+                source: "provider-bonus-track",
               },
               result: {
                 providerTaskId: track.providerTaskId,

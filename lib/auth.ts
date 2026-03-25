@@ -3,12 +3,13 @@ import { SignJWT, jwtVerify } from "jose";
 import { env } from "@/lib/env";
 
 export const AUTH_COOKIE_NAME = "music-platform-session";
+export const GOOGLE_AUTH_STATE_COOKIE_NAME = "music-platform-google-state";
 
 // 쿠키 안에 담는 최소 사용자 정보. 민감 데이터는 넣지 않는다.
 export type SessionUser = {
   id: string;
   email: string;
-  role: "USER" | "ADMIN";
+  role: "USER" | "DEVELOPER" | "ADMIN";
 };
 
 const secret = new TextEncoder().encode(env.AUTH_SECRET);
@@ -47,6 +48,16 @@ export function buildSessionCookieOptions(maxAge: number) {
   };
 }
 
+export function buildOAuthStateCookieOptions(maxAge: number) {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: isSecureCookie,
+    path: "/",
+    maxAge,
+  };
+}
+
 // 쿠키 토큰을 검증하고 내부에서 쓰기 쉬운 SessionUser 형태로 다시 만든다.
 export async function verifySessionToken(token: string) {
   const { payload } = await jwtVerify(token, secret);
@@ -54,7 +65,12 @@ export async function verifySessionToken(token: string) {
   return {
     id: payload.sub ?? "",
     email: String(payload.email ?? ""),
-    role: payload.role === "ADMIN" ? "ADMIN" : "USER",
+    role:
+      payload.role === "ADMIN"
+        ? "ADMIN"
+        : payload.role === "DEVELOPER"
+          ? "DEVELOPER"
+          : "USER",
   } satisfies SessionUser;
 }
 

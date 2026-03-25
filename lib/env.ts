@@ -16,6 +16,8 @@ const envSchema = z.object({
   MUSIC_PROVIDER_MODE: z.enum(["mock", "suno"]).default("mock"),
   APP_URL: z.string().url().optional(),
   AUTH_SECRET: z.string().min(16),
+  GOOGLE_CLIENT_ID: emptyStringToUndefined,
+  GOOGLE_CLIENT_SECRET: emptyStringToUndefined,
 });
 
 const parsedEnv = envSchema.safeParse({
@@ -26,6 +28,8 @@ const parsedEnv = envSchema.safeParse({
   MUSIC_PROVIDER_MODE: process.env.MUSIC_PROVIDER_MODE,
   APP_URL: process.env.APP_URL,
   AUTH_SECRET: process.env.AUTH_SECRET,
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
 });
 
 if (!parsedEnv.success) {

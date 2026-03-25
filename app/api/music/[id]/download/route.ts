@@ -1,6 +1,7 @@
-﻿import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { DOWNLOAD_DELAY_MS } from "@/server/music/constants";
 
 type RouteContext = {
   params: Promise<{
@@ -37,7 +38,10 @@ export async function GET(_: Request, context: RouteContext) {
       userId: true,
       mp3Url: true,
       requestGroupId: true,
+      isBonusTrack: true,
+      bonusUnlockedAt: true,
       createdAt: true,
+      updatedAt: true,
       generationJobs: {
         where: {
           jobType: "MUSIC_GENERATION",
@@ -57,8 +61,27 @@ export async function GET(_: Request, context: RouteContext) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  if (music.isBonusTrack && !music.bonusUnlockedAt) {
+    return NextResponse.json(
+      { error: "추가곡을 먼저 열어야 다운로드할 수 있습니다." },
+      { status: 403 },
+    );
+  }
+
   if (!music.mp3Url) {
     return NextResponse.json({ error: "MP3 file is not ready yet." }, { status: 409 });
+  }
+
+  const downloadAvailableAt = music.updatedAt.getTime() + DOWNLOAD_DELAY_MS;
+
+  if (Date.now() < downloadAvailableAt) {
+    return NextResponse.json(
+      {
+        error: "듣기 가능 후 90초가 지나야 다운로드할 수 있습니다. 지금은 듣기만 가능합니다.",
+        downloadAvailableAt: new Date(downloadAvailableAt).toISOString(),
+      },
+      { status: 403 },
+    );
   }
 
   const upstream = await fetch(music.mp3Url);

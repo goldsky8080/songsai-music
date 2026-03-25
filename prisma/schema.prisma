@@ -10,6 +10,7 @@ datasource db {
 /// 사용자 권한 구분
 enum UserRole {
   USER
+  DEVELOPER
   ADMIN
 }
 
@@ -85,6 +86,7 @@ enum QueueStatus {
 model User {
   id             String        @id @default(cuid())
   email          String        @unique
+  googleId       String?       @unique
   passwordHash   String
   freeCredits    Int           @default(0)
   paidCredits    Int           @default(0)
@@ -97,6 +99,8 @@ model User {
   transactions   Transaction[]
   generationJobs GenerationJob[]
   creditGrants   CreditGrant[]
+  createdCoupons Coupon[]      @relation("CouponCreator")
+  couponUses     CouponRedemption[]
 }
 
 /// 생성된 음악 트랙 단위 레코드. 같은 요청에서 나온 곡은 requestGroupId로 묶는다.
@@ -109,6 +113,8 @@ model Music {
   provider       String
   providerTaskId String?         @unique
   mp3Url         String?
+  isBonusTrack   Boolean         @default(false)
+  bonusUnlockedAt DateTime?
   status         MusicStatus     @default(QUEUED)
   duration       Int?
   errorMessage   String?
@@ -206,4 +212,34 @@ model GenerationJob {
   @@index([queueStatus, jobType])
   @@index([musicId])
   @@index([videoId])
+}
+
+model Coupon {
+  id            String             @id @default(cuid())
+  code          String             @unique
+  amount        Int
+  remainingUses Int
+  maxUses       Int
+  isActive      Boolean            @default(true)
+  createdById   String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  createdBy     User               @relation("CouponCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  redemptions   CouponRedemption[]
+
+  @@index([isActive, createdAt])
+}
+
+model CouponRedemption {
+  id        String   @id @default(cuid())
+  couponId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  coupon    Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([couponId, userId])
+  @@index([userId, createdAt])
 }

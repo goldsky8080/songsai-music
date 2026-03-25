@@ -115,7 +115,10 @@ export class SunoProvider implements MusicProvider {
           : inferVocalGender(input.stylePrompt);
     const tags = buildStyleTags(input.stylePrompt, vocalGender);
     const sunoModel = resolveModelVersion(input.modelVersion);
-    const isAutoLyrics = input.lyricMode === "auto";
+    const isAutoLyrics = input.lyricMode !== "manual";
+    const autoLyricsPrompt = input.stylePrompt.trim()
+      ? `${input.lyrics.trim()}\n스타일은 ${tags} 느낌으로 만들어줘.`
+      : input.lyrics;
 
     /**
      * 자동 가사 모드는 현재 API 레벨에서 막혀 있지만,
@@ -134,7 +137,7 @@ export class SunoProvider implements MusicProvider {
       ? {
           title: input.title,
           prompt: "",
-          gpt_description_prompt: input.lyrics,
+          gpt_description_prompt: autoLyricsPrompt,
           tags,
           negative_tags: "",
           generation_type: "TEXT",

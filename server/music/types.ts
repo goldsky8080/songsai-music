@@ -3,9 +3,9 @@ export type CreateMusicInput = {
   title: string;
   lyrics: string;
   stylePrompt: string;
-  lyricMode?: "manual" | "auto";
+  lyricMode?: "manual" | "auto" | "ai_lyrics";
   vocalGender?: "auto" | "female" | "male";
-  trackCount?: 1 | 2;
+  trackCount?: 1;
   modelVersion?: "v4_5_plus" | "v5";
   userId: string;
 };

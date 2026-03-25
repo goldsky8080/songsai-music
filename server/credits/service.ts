@@ -5,19 +5,17 @@ import {
   FREE_SIGNUP_CREDITS,
   PAID_CREDIT_DAYS,
 } from "@/server/credits/constants";
-import { getMusicGenerationCost } from "@/server/music/constants";
+import {
+  ADDITIONAL_TRACK_UNLOCK_COST,
+  getMusicGenerationCost,
+} from "@/server/music/constants";
 
-// 만료일 계산을 공통화하기 위한 유틸리티.
 function addDays(date: Date, days: number) {
   const nextDate = new Date(date);
   nextDate.setDate(nextDate.getDate() + days);
   return nextDate;
 }
 
-/**
- * CreditGrant 원장을 기준으로 실제 사용 가능한 잔액을 다시 계산해 user 테이블에 반영한다.
- * User.freeCredits / paidCredits 는 조회 성능용 캐시 필드이므로 중요한 작업 전 동기화가 필요하다.
- */
 export async function syncUserCreditBalances(userId: string, tx?: Prisma.TransactionClient) {
   const client = tx ?? db;
   const now = new Date();
@@ -80,72 +78,88 @@ export async function syncUserCreditBalances(userId: string, tx?: Prisma.Transac
   };
 }
 
-/**
- * 회원가입 즉시 지급되는 무료 크레딧을 생성한다.
- * 원장(CreditGrant), 회계 로그(Transaction), 캐시 잔액(User)을 함께 맞춰 둔다.
- */
 export async function grantSignupCredits(userId: string, tx: Prisma.TransactionClient) {
-  const now = new Date();
-  const expiresAt = addDays(now, FREE_CREDIT_DAYS);
-
-  await tx.creditGrant.create({
-    data: {
-      userId,
-      creditKind: CreditKind.FREE,
-      amount: FREE_SIGNUP_CREDITS,
-      remainingAmount: FREE_SIGNUP_CREDITS,
-      expiresAt,
-      source: "signup_bonus",
-    },
-  });
-
-  await tx.transaction.create({
-    data: {
-      userId,
-      amount: FREE_SIGNUP_CREDITS,
-      creditKind: CreditKind.FREE,
-      type: "DEPOSIT",
-      status: "COMPLETED",
-      balanceAfter: FREE_SIGNUP_CREDITS,
-      memo: "회원가입 무료 크레딧 지급",
-    },
-  });
-
-  await tx.user.update({
-    where: { id: userId },
-    data: {
-      freeCredits: FREE_SIGNUP_CREDITS,
-      paidCredits: 0,
-    },
-  });
-
-  return {
-    expiresAt,
-  };
+  return grantCredits(userId, FREE_SIGNUP_CREDITS, CreditKind.FREE, "signup_bonus", "signup bonus credits", tx);
 }
 
 export function getCreditExpiryDays(creditKind: CreditKind) {
   return creditKind === CreditKind.FREE ? FREE_CREDIT_DAYS : PAID_CREDIT_DAYS;
 }
 
-/**
- * 음악 생성 시점에 크레딧을 선차감한다.
- * 정책상 무료 크레딧을 먼저 쓰고, 부족하면 유료 크레딧을 이어서 차감한다.
- */
-export async function consumeMusicGenerationCredits(
+export async function grantCredits(
   userId: string,
-  musicId: string,
-  trackCount: 1 | 2,
+  amount: number,
+  creditKind: CreditKind,
+  source: string,
+  memo: string,
   tx: Prisma.TransactionClient,
 ) {
-  const generationCost = getMusicGenerationCost(trackCount);
+  const now = new Date();
+  const expiresAt = addDays(now, getCreditExpiryDays(creditKind));
+  const currentUser = await tx.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: {
+      freeCredits: true,
+      paidCredits: true,
+    },
+  });
+
+  const nextFreeCredits =
+    creditKind === CreditKind.FREE ? currentUser.freeCredits + amount : currentUser.freeCredits;
+  const nextPaidCredits =
+    creditKind === CreditKind.PAID ? currentUser.paidCredits + amount : currentUser.paidCredits;
+
+  await tx.creditGrant.create({
+    data: {
+      userId,
+      creditKind,
+      amount,
+      remainingAmount: amount,
+      expiresAt,
+      source,
+    },
+  });
+
+  await tx.transaction.create({
+    data: {
+      userId,
+      amount,
+      creditKind,
+      type: "DEPOSIT",
+      status: "COMPLETED",
+      balanceAfter: creditKind === CreditKind.FREE ? nextFreeCredits : nextPaidCredits,
+      memo,
+    },
+  });
+
+  await tx.user.update({
+    where: { id: userId },
+    data: {
+      freeCredits: nextFreeCredits,
+      paidCredits: nextPaidCredits,
+    },
+  });
+
+  return {
+    expiresAt,
+    nextFreeCredits,
+    nextPaidCredits,
+  };
+}
+
+async function consumeCredits(
+  userId: string,
+  amount: number,
+  memo: string,
+  tx: Prisma.TransactionClient,
+) {
   const balances = await syncUserCreditBalances(userId, tx);
 
-  if (balances.totalCredits < generationCost) {
+  if (balances.totalCredits < amount) {
     throw new Error("크레딧이 부족합니다.");
   }
 
-  let remainingCost = generationCost;
+  let remainingCost = amount;
 
   const grants = await tx.creditGrant.findMany({
     where: {
@@ -168,7 +182,6 @@ export async function consumeMusicGenerationCredits(
   let freeSpent = 0;
   let paidSpent = 0;
 
-  // grant 단위 차감을 유지해야 만료/환불 이력이 정확해진다.
   for (const grant of grants) {
     if (remainingCost <= 0) {
       break;
@@ -207,7 +220,7 @@ export async function consumeMusicGenerationCredits(
         type: "USAGE",
         status: "COMPLETED",
         balanceAfter: nextFreeCredits,
-        memo: `music_generation:${musicId}`,
+        memo,
       },
     });
   }
@@ -221,7 +234,7 @@ export async function consumeMusicGenerationCredits(
         type: "USAGE",
         status: "COMPLETED",
         balanceAfter: nextPaidCredits,
-        memo: `music_generation:${musicId}`,
+        memo,
       },
     });
   }
@@ -235,16 +248,35 @@ export async function consumeMusicGenerationCredits(
   });
 
   return {
-    chargedAmount: generationCost,
+    chargedAmount: amount,
     freeSpent,
     paidSpent,
   };
 }
 
-/**
- * provider 요청 실패 시 선차감한 크레딧을 되돌린다.
- * 단순 숫자 복원이 아니라 새로운 refund grant 와 refund transaction 을 남겨 회계 이력을 보존한다.
- */
+export async function consumeMusicGenerationCredits(
+  userId: string,
+  musicId: string,
+  trackCount: 1 | 2,
+  tx: Prisma.TransactionClient,
+) {
+  const generationCost = getMusicGenerationCost(trackCount);
+  return consumeCredits(userId, generationCost, `music_generation:${musicId}`, tx);
+}
+
+export async function consumeAdditionalTrackUnlockCredits(
+  userId: string,
+  musicGroupId: string,
+  tx: Prisma.TransactionClient,
+) {
+  return consumeCredits(
+    userId,
+    ADDITIONAL_TRACK_UNLOCK_COST,
+    `music_bonus_unlock:${musicGroupId}`,
+    tx,
+  );
+}
+
 export async function refundMusicGenerationCredits(userId: string, musicId: string) {
   const usageTransactions = await db.transaction.findMany({
     where: {
