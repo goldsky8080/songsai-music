@@ -1,4 +1,5 @@
 ALTER TABLE "Music"
+ADD COLUMN IF NOT EXISTS "requestGroupId" TEXT,
 ADD COLUMN "isBonusTrack" BOOLEAN NOT NULL DEFAULT false,
 ADD COLUMN "bonusUnlockedAt" TIMESTAMP(3);
 

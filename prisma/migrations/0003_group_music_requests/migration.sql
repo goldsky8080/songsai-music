@@ -1,5 +1,5 @@
 ALTER TABLE "Music"
-ADD COLUMN "requestGroupId" TEXT;
+ADD COLUMN IF NOT EXISTS "requestGroupId" TEXT;
 
-CREATE INDEX "Music_requestGroupId_createdAt_idx"
+CREATE INDEX IF NOT EXISTS "Music_requestGroupId_createdAt_idx"
 ON "Music"("requestGroupId", "createdAt");
