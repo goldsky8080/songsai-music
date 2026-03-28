@@ -16,9 +16,18 @@ export interface MusicProvider {
 
 const SONGS_MODEL_V5 = "chirp-crow";
 const SONGS_MODEL_V45_PLUS = "chirp-bluejay";
+const SONGS_MODEL_V55 = "chirp-fenix";
 
-function resolveModelVersion(modelVersion?: "v4_5_plus" | "v5") {
-  return modelVersion === "v4_5_plus" ? SONGS_MODEL_V45_PLUS : SONGS_MODEL_V5;
+function resolveModelVersion(modelVersion?: "v4_5_plus" | "v5" | "v5_5") {
+  if (modelVersion === "v4_5_plus") {
+    return SONGS_MODEL_V45_PLUS;
+  }
+
+  if (modelVersion === "v5_5") {
+    return SONGS_MODEL_V55;
+  }
+
+  return SONGS_MODEL_V5;
 }
 
 function inferVocalGender(stylePrompt: string): "f" | "m" | undefined {
@@ -78,15 +87,9 @@ class MockMusicProvider implements MusicProvider {
 
 export class SongsProvider implements MusicProvider {
   private buildHeaders() {
-    const headers: Record<string, string> = {
+    return {
       "Content-Type": "application/json",
-    };
-
-    if (env.SONGS_COOKIE) {
-      headers.Cookie = env.SONGS_COOKIE;
-    }
-
-    return headers;
+    } satisfies Record<string, string>;
   }
 
   async createMusic(input: CreateMusicInput): Promise<ProviderMusicResult> {
@@ -108,6 +111,26 @@ export class SongsProvider implements MusicProvider {
       : input.lyrics;
 
     const endpoint = `${env.SONGS_API_BASE_URL}/api/custom_generate`;
+
+    console.info(
+      "[SongsProvider.createMusic]",
+      JSON.stringify(
+        {
+          lyricMode: input.lyricMode,
+          modelVersion: input.modelVersion,
+          resolvedModel: songsModel,
+          title: input.title,
+          vocalGender: input.vocalGender,
+          inferredVocalGender: vocalGender,
+          stylePrompt: input.stylePrompt,
+          tags,
+          isAutoLyrics,
+          autoLyricsPrompt: isAutoLyrics ? autoLyricsPrompt : undefined,
+        },
+        null,
+        2,
+      ),
+    );
 
     const payload = isAutoLyrics
       ? {
@@ -161,12 +184,18 @@ export class SongsProvider implements MusicProvider {
           id?: string;
           status?: string;
           audio_url?: string;
+          video_url?: string;
+          image_url?: string;
+          image_large_url?: string;
         }>
       | {
           clips?: Array<{
             id?: string;
             status?: string;
             audio_url?: string;
+            video_url?: string;
+            image_url?: string;
+            image_large_url?: string;
           }>;
         };
 
@@ -183,8 +212,21 @@ export class SongsProvider implements MusicProvider {
         .join(","),
       status: "queued",
       mp3Url: data[0]?.audio_url,
+      videoUrl: data[0]?.video_url,
+      imageUrl: data[0]?.image_url,
+      imageLargeUrl: data[0]?.image_large_url,
       tracks: data
-        .filter((item): item is { id: string; status?: string; audio_url?: string } => Boolean(item.id))
+        .filter(
+          (item): item is {
+            id: string;
+            status?: string;
+            audio_url?: string;
+            video_url?: string;
+            image_url?: string;
+            image_large_url?: string;
+          } =>
+            Boolean(item.id),
+        )
         .map((item) => ({
           providerTaskId: item.id,
           status:
@@ -196,6 +238,9 @@ export class SongsProvider implements MusicProvider {
                   ? "processing"
                   : "queued",
           mp3Url: item.audio_url,
+          videoUrl: item.video_url,
+          imageUrl: item.image_url,
+          imageLargeUrl: item.image_large_url,
         })),
     };
   }
@@ -218,6 +263,12 @@ export class SongsProvider implements MusicProvider {
       id?: string;
       status?: string;
       audio_url?: string;
+      video_url?: string;
+      image_url?: string;
+      image_large_url?: string;
+      lyric?: string;
+      prompt?: string;
+      gpt_description_prompt?: string;
       error_message?: string;
     }>;
 
@@ -238,6 +289,12 @@ export class SongsProvider implements MusicProvider {
       providerTaskId: taskId,
       status: hasFailure ? "failed" : isCompleted ? "completed" : isProcessing ? "processing" : "queued",
       mp3Url: data[0]?.audio_url,
+      videoUrl: data[0]?.video_url,
+      imageUrl: data[0]?.image_url,
+      imageLargeUrl: data[0]?.image_large_url,
+      generatedLyrics: data[0]?.lyric || data[0]?.prompt,
+      providerPrompt: data[0]?.prompt,
+      providerDescriptionPrompt: data[0]?.gpt_description_prompt,
       errorMessage: data.find((item) => item.error_message)?.error_message,
     };
   }

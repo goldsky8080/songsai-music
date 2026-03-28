@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
+import { TrackDownloadMenu } from "@/components/track-download-menu";
 
 type MusicTrack = {
   id: string;
   status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED";
   mp3Url: string | null;
+  mp4Url?: string | null;
   downloadAvailableAt: string;
 };
 
@@ -88,6 +90,10 @@ function formatRemainingDownloadTimeFromNow(targetTime: string, now: number) {
   return `${minutes}:${String(seconds).padStart(2, "0")} 후`;
 }
 
+function buildTrackPlaybackUrl(trackId: string) {
+  return `/api/music/${trackId}/download?inline=1`;
+}
+
 export default function MusicHistoryPage() {
   const [items, setItems] = useState<MusicItem[]>([]);
   const [pagination, setPagination] = useState<Pagination>({
@@ -99,6 +105,8 @@ export default function MusicHistoryPage() {
   const [message, setMessage] = useState("목록을 불러오는 중입니다...");
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [isPending, startTransition] = useTransition();
+  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
+  const [playingTrackUrl, setPlayingTrackUrl] = useState<string | null>(null);
 
   async function loadPage(page: number) {
     const response = await fetch(`/api/music?page=${page}&limit=20`, {
@@ -159,6 +167,17 @@ export default function MusicHistoryPage() {
     });
   }
 
+  function toggleTrackPlayback(trackId: string) {
+    if (playingTrackId === trackId) {
+      setPlayingTrackId(null);
+      setPlayingTrackUrl(null);
+      return;
+    }
+
+    setPlayingTrackId(trackId);
+    setPlayingTrackUrl(buildTrackPlaybackUrl(trackId));
+  }
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 py-8 sm:px-6">
       <div className="rounded-[1.8rem] border border-[var(--border)] bg-white/92 p-6 shadow-[0_18px_50px_rgba(90,55,30,0.1)]">
@@ -179,10 +198,10 @@ export default function MusicHistoryPage() {
         </div>
 
         <div className="mt-6 overflow-hidden rounded-[1.2rem] border border-[var(--border)]">
-          <div className="grid grid-cols-[120px_minmax(0,1fr)_260px] gap-3 bg-[#f8f3eb] px-4 py-3 text-xs font-semibold text-[#6b5648]">
+          <div className="grid grid-cols-[96px_minmax(0,1fr)_170px] gap-3 bg-[#f8f3eb] px-4 py-3 text-xs font-semibold text-[#6b5648] sm:grid-cols-[120px_minmax(0,1fr)_260px]">
             <span>시간</span>
             <span>제목</span>
-            <span>다운로드</span>
+            <span>다운</span>
           </div>
 
           <div className="divide-y divide-[var(--border)] bg-white">
@@ -190,51 +209,73 @@ export default function MusicHistoryPage() {
               <div className="px-4 py-6 text-sm text-[#6b5648]">{message}</div>
             ) : (
               items.map((item) => (
-                <div
-                  key={item.id}
-                  className="grid grid-cols-[120px_minmax(0,1fr)_260px] gap-3 px-4 py-3 text-sm text-[#3f2f25]"
-                >
-                  <span className="text-xs text-[#8a7465]">{formatDate(item.createdAt)}</span>
-                  <span className="truncate font-medium">{summarizeTitle(item)}</span>
-                  <div className="flex flex-wrap gap-2">
-                    {item.tracks.map((track, index) =>
-                      track.mp3Url ? (
-                        new Date(track.downloadAvailableAt).getTime() <= nowTs ? (
-                          <a
-                            key={track.id}
-                            href={`/api/music/${track.id}/download`}
-                            className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-[11px] font-semibold text-white"
-                          >
-                            다운로드 {index + 1}
-                          </a>
+                <div key={item.id} className="px-4 py-3 text-sm text-[#3f2f25]">
+                  <div className="grid grid-cols-[96px_minmax(0,1fr)_170px] gap-3 sm:grid-cols-[120px_minmax(0,1fr)_260px]">
+                    <span className="text-xs text-[#8a7465]">{formatDate(item.createdAt)}</span>
+                    <span className="truncate font-medium">{summarizeTitle(item)}</span>
+                      <div className="flex flex-wrap gap-2">
+                        {item.tracks.map((track, index) =>
+                          track.mp3Url ? (
+                            <div key={track.id} className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => toggleTrackPlayback(track.id)}
+                                className="rounded-full border border-[var(--border)] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#4e3b30]"
+                              >
+                              {playingTrackId === track.id ? `닫기${index + 1}` : `듣기${index + 1}`}
+                            </button>
+                            {new Date(track.downloadAvailableAt).getTime() <= nowTs ? (
+                              <>
+                                <TrackDownloadMenu
+                                  trackId={track.id}
+                                  trackIndex={index + 1}
+                                  mp4Url={track.mp4Url}
+                                  lyrics={item.lyrics}
+                                  onCompleted={() => loadPage(pagination.page)}
+                                />
+                              </>
+                            ) : (
+                              <span
+                                className="rounded-full border border-[var(--border)] bg-[#f7f2eb] px-3 py-1.5 text-[11px] text-[#8a7465]"
+                              >
+                                {formatRemainingDownloadTimeFromNow(track.downloadAvailableAt, nowTs)}
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <span
                             key={track.id}
                             className="rounded-full border border-[var(--border)] bg-[#f7f2eb] px-3 py-1.5 text-[11px] text-[#8a7465]"
                           >
-                            {formatRemainingDownloadTimeFromNow(track.downloadAvailableAt, nowTs)}
+                            준비중 {index + 1}
                           </span>
-                        )
-                      ) : (
-                        <span
-                          key={track.id}
-                          className="rounded-full border border-[var(--border)] bg-[#f7f2eb] px-3 py-1.5 text-[11px] text-[#8a7465]"
+                        ),
+                      )}
+                      {item.canUnlockBonusTrack ? (
+                        <button
+                          type="button"
+                          onClick={() => unlockBonusTrack(item.id)}
+                          disabled={isPending}
+                          className="rounded-full border border-[var(--accent)] bg-[#fff1eb] px-3 py-1.5 text-[11px] font-semibold text-[var(--accent)] disabled:opacity-60"
                         >
-                          준비중 {index + 1}
-                        </span>
-                      ),
-                    )}
-                    {item.canUnlockBonusTrack ? (
-                      <button
-                        type="button"
-                        onClick={() => unlockBonusTrack(item.id)}
-                        disabled={isPending}
-                        className="rounded-full border border-[var(--accent)] bg-[#fff1eb] px-3 py-1.5 text-[11px] font-semibold text-[var(--accent)] disabled:opacity-60"
-                      >
-                        추가곡생성 {item.bonusUnlockCost}
-                      </button>
-                    ) : null}
+                          추가곡생성 {item.bonusUnlockCost}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
+                  {playingTrackId && item.tracks.some((track) => track.id === playingTrackId) && playingTrackUrl ? (
+                    <div className="mt-3 rounded-[1rem] border border-[var(--border)] bg-[#f8f3eb] px-3 py-3">
+                      <p className="mb-2 text-[11px] font-semibold text-[#6b5648]">현재 재생</p>
+                      <audio
+                        key={playingTrackId}
+                        controls
+                        autoPlay
+                        preload="metadata"
+                        src={playingTrackUrl}
+                        className="w-full"
+                      />
+                    </div>
+                  ) : null}
                 </div>
               ))
             )}

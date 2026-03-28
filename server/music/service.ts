@@ -1,9 +1,8 @@
-import { MusicStatus, QueueStatus } from "@prisma/client";
+import { MusicStatus, QueueStatus, VideoStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getMusicProvider } from "@/server/music/provider";
 import type { ProviderMusicResult } from "@/server/music/types";
 
-// provider 문자열 상태를 내부 MusicStatus enum으로 정규화한다.
 function toDbMusicStatus(status: ProviderMusicResult["status"]): MusicStatus {
   switch (status) {
     case "queued":
@@ -19,7 +18,6 @@ function toDbMusicStatus(status: ProviderMusicResult["status"]): MusicStatus {
   }
 }
 
-// 작업 큐 레코드도 같은 시점에 함께 갱신하기 위해 QueueStatus로 변환한다.
 function toDbQueueStatus(status: ProviderMusicResult["status"]): QueueStatus {
   switch (status) {
     case "queued":
@@ -35,10 +33,6 @@ function toDbQueueStatus(status: ProviderMusicResult["status"]): QueueStatus {
   }
 }
 
-/**
- * 현재 사용자 기준으로 진행 중인 음악의 최신 상태를 provider에서 다시 읽어와 반영한다.
- * 아직은 GET /api/music 시점의 경량 폴링 방식이며, 추후 워커 분리 시 배치 작업으로 이동 가능하다.
- */
 export async function syncMusicStatuses(userId: string) {
   const provider = getMusicProvider();
 
@@ -65,18 +59,25 @@ export async function syncMusicStatuses(userId: string) {
 
     try {
       const snapshot = await provider.getMusicStatus(music.providerTaskId);
+      const existingVideo = snapshot.videoUrl
+        ? await db.video.findFirst({
+            where: { musicId: music.id },
+            orderBy: { createdAt: "desc" },
+            select: { id: true },
+          })
+        : null;
 
-      // Music 레코드와 GenerationJob 결과를 동시에 갱신해 화면/운영 로그가 엇갈리지 않게 맞춘다.
-      await db.$transaction([
-        db.music.update({
+      await db.$transaction(async (tx) => {
+        await tx.music.update({
           where: { id: music.id },
           data: {
             status: toDbMusicStatus(snapshot.status),
             mp3Url: snapshot.mp3Url ?? music.mp3Url,
             errorMessage: snapshot.errorMessage ?? null,
           },
-        }),
-        db.generationJob.updateMany({
+        });
+
+        await tx.generationJob.updateMany({
           where: {
             musicId: music.id,
             jobType: "MUSIC_GENERATION",
@@ -87,35 +88,55 @@ export async function syncMusicStatuses(userId: string) {
               providerTaskId: snapshot.providerTaskId,
               status: snapshot.status,
               mp3Url: snapshot.mp3Url ?? null,
+              videoUrl: snapshot.videoUrl ?? null,
+              generatedLyrics: snapshot.generatedLyrics ?? null,
+              providerPrompt: snapshot.providerPrompt ?? null,
+              providerDescriptionPrompt: snapshot.providerDescriptionPrompt ?? null,
             },
             errorMessage: snapshot.errorMessage ?? null,
           },
-        }),
-      ]);
+        });
+
+        if (snapshot.videoUrl) {
+          if (existingVideo) {
+            await tx.video.update({
+              where: { id: existingVideo.id },
+              data: {
+                mp4Url: snapshot.videoUrl,
+                status: VideoStatus.COMPLETED,
+                errorMessage: null,
+              },
+            });
+          } else {
+            await tx.video.create({
+              data: {
+                musicId: music.id,
+                mp4Url: snapshot.videoUrl,
+                status: VideoStatus.COMPLETED,
+              },
+            });
+          }
+        }
+      });
     } catch (error) {
-      // 상태 조회 실패 자체도 운영 중 중요한 단서이므로 failed 상태와 메시지를 남긴다.
       const errorMessage =
         error instanceof Error ? error.message : "Provider status lookup failed.";
 
-      await db.$transaction([
-        db.music.update({
-          where: { id: music.id },
-          data: {
-            status: MusicStatus.FAILED,
-            errorMessage,
-          },
-        }),
-        db.generationJob.updateMany({
-          where: {
-            musicId: music.id,
-            jobType: "MUSIC_GENERATION",
-          },
-          data: {
-            queueStatus: QueueStatus.FAILED,
-            errorMessage,
-          },
-        }),
-      ]);
+      console.warn("[syncMusicStatuses] Provider status lookup failed", {
+        musicId: music.id,
+        providerTaskId: music.providerTaskId,
+        error: errorMessage,
+      });
+
+      await db.generationJob.updateMany({
+        where: {
+          musicId: music.id,
+          jobType: "MUSIC_GENERATION",
+        },
+        data: {
+          errorMessage,
+        },
+      });
     }
   }
 }

@@ -8,6 +8,7 @@ import {
 import {
   ADDITIONAL_TRACK_UNLOCK_COST,
   getMusicGenerationCost,
+  VIDEO_RENDER_COST,
 } from "@/server/music/constants";
 
 function addDays(date: Date, days: number) {
@@ -147,6 +148,101 @@ export async function grantCredits(
   };
 }
 
+export async function setUserCreditBalances(
+  userId: string,
+  nextFreeCredits: number,
+  nextPaidCredits: number,
+  source: string,
+  memo: string,
+  tx: Prisma.TransactionClient,
+) {
+  const currentBalances = await syncUserCreditBalances(userId, tx);
+  const now = new Date();
+
+  await tx.creditGrant.updateMany({
+    where: {
+      userId,
+      status: CreditGrantStatus.ACTIVE,
+      remainingAmount: {
+        gt: 0,
+      },
+    },
+    data: {
+      remainingAmount: 0,
+      status: CreditGrantStatus.CONSUMED,
+      updatedAt: now,
+    },
+  });
+
+  if (nextFreeCredits > 0) {
+    await tx.creditGrant.create({
+      data: {
+        userId,
+        creditKind: CreditKind.FREE,
+        amount: nextFreeCredits,
+        remainingAmount: nextFreeCredits,
+        expiresAt: addDays(now, getCreditExpiryDays(CreditKind.FREE)),
+        source,
+      },
+    });
+  }
+
+  if (nextPaidCredits > 0) {
+    await tx.creditGrant.create({
+      data: {
+        userId,
+        creditKind: CreditKind.PAID,
+        amount: nextPaidCredits,
+        remainingAmount: nextPaidCredits,
+        expiresAt: addDays(now, getCreditExpiryDays(CreditKind.PAID)),
+        source,
+      },
+    });
+  }
+
+  if (currentBalances.freeCredits !== nextFreeCredits) {
+    await tx.transaction.create({
+      data: {
+        userId,
+        amount: nextFreeCredits - currentBalances.freeCredits,
+        creditKind: CreditKind.FREE,
+        type: "ADJUSTMENT",
+        status: "COMPLETED",
+        balanceAfter: nextFreeCredits,
+        memo,
+      },
+    });
+  }
+
+  if (currentBalances.paidCredits !== nextPaidCredits) {
+    await tx.transaction.create({
+      data: {
+        userId,
+        amount: nextPaidCredits - currentBalances.paidCredits,
+        creditKind: CreditKind.PAID,
+        type: "ADJUSTMENT",
+        status: "COMPLETED",
+        balanceAfter: nextPaidCredits,
+        memo,
+      },
+    });
+  }
+
+  await tx.user.update({
+    where: { id: userId },
+    data: {
+      freeCredits: nextFreeCredits,
+      paidCredits: nextPaidCredits,
+    },
+  });
+
+  return {
+    freeCredits: nextFreeCredits,
+    paidCredits: nextPaidCredits,
+    totalCredits: nextFreeCredits + nextPaidCredits,
+  };
+}
+
 async function consumeCredits(
   userId: string,
   amount: number,
@@ -277,13 +373,21 @@ export async function consumeAdditionalTrackUnlockCredits(
   );
 }
 
-export async function refundMusicGenerationCredits(userId: string, musicId: string) {
+export async function consumeVideoRenderCredits(
+  userId: string,
+  videoId: string,
+  tx: Prisma.TransactionClient,
+) {
+  return consumeCredits(userId, VIDEO_RENDER_COST, `video_render:${videoId}`, tx);
+}
+
+async function refundUsageCreditsByMemo(userId: string, usageMemo: string, refundMemoPrefix: string) {
   const usageTransactions = await db.transaction.findMany({
     where: {
       userId,
       type: "USAGE",
       status: "COMPLETED",
-      memo: `music_generation:${musicId}`,
+      memo: usageMemo,
     },
   });
 
@@ -316,7 +420,7 @@ export async function refundMusicGenerationCredits(userId: string, musicId: stri
           amount: refundAmount,
           remainingAmount: refundAmount,
           expiresAt: addDays(new Date(), getCreditExpiryDays(creditKind)),
-          source: `refund:${musicId}`,
+          source: `refund:${usageMemo}`,
         },
       });
 
@@ -334,7 +438,7 @@ export async function refundMusicGenerationCredits(userId: string, musicId: stri
           type: "REFUND",
           status: "COMPLETED",
           balanceAfter: creditKind === CreditKind.FREE ? freeCredits : paidCredits,
-          memo: `music_generation_refund:${musicId}`,
+          memo: `${refundMemoPrefix}:${entry.id}`,
         },
       });
 
@@ -342,7 +446,7 @@ export async function refundMusicGenerationCredits(userId: string, musicId: stri
         where: { id: entry.id },
         data: {
           status: "CANCELLED",
-          memo: `music_generation:${musicId}:refunded`,
+          memo: `${usageMemo}:refunded`,
         },
       });
     }
@@ -355,4 +459,20 @@ export async function refundMusicGenerationCredits(userId: string, musicId: stri
       },
     });
   });
+}
+
+export async function refundMusicGenerationCredits(userId: string, musicId: string) {
+  await refundUsageCreditsByMemo(
+    userId,
+    `music_generation:${musicId}`,
+    `music_generation_refund:${musicId}`,
+  );
+}
+
+export async function refundVideoRenderCredits(userId: string, videoId: string) {
+  await refundUsageCreditsByMemo(
+    userId,
+    `video_render:${videoId}`,
+    `video_render_refund:${videoId}`,
+  );
 }

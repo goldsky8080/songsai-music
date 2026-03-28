@@ -1,11 +1,11 @@
-import { CreditKind, type Prisma, type UserRole } from "@prisma/client";
+﻿import { type Prisma, type UserRole } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { toPublicUser } from "@/server/auth/user";
 import { canAccessAdminPage, isOperator } from "@/server/auth/guards";
-import { grantCredits, syncUserCreditBalances } from "@/server/credits/service";
+import { setUserCreditBalances, syncUserCreditBalances } from "@/server/credits/service";
 
 const updateUserSchema = z.object({
   userId: z.string().min(1),
@@ -19,32 +19,55 @@ function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const sessionUser = await getSessionUser();
 
   if (!sessionUser || !canAccessAdminPage(sessionUser.role)) {
     return unauthorized();
   }
 
-  const users = await db.user.findMany({
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      email: true,
-      freeCredits: true,
-      paidCredits: true,
-      tier: true,
-      role: true,
-      createdAt: true,
-      updatedAt: true,
-      _count: {
-        select: {
-          musics: true,
-          transactions: true,
+  const { searchParams } = new URL(request.url);
+  const query = searchParams.get("query")?.trim() ?? "";
+  const page = Math.max(1, Number.parseInt(searchParams.get("page") ?? "1", 10) || 1);
+  const limit = Math.min(
+    50,
+    Math.max(1, Number.parseInt(searchParams.get("limit") ?? "10", 10) || 10),
+  );
+
+  const where: Prisma.UserWhereInput = query
+    ? {
+        email: {
+          contains: query,
+          mode: "insensitive",
+        },
+      }
+    : {};
+
+  const [users, total] = await Promise.all([
+    db.user.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+      select: {
+        id: true,
+        email: true,
+        freeCredits: true,
+        paidCredits: true,
+        tier: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
+        _count: {
+          select: {
+            musics: true,
+            transactions: true,
+          },
         },
       },
-    },
-  });
+    }),
+    db.user.count({ where }),
+  ]);
 
   return NextResponse.json({
     items: users.map((user) => ({
@@ -60,6 +83,12 @@ export async function GET() {
       musicCount: user._count.musics,
       transactionCount: user._count.transactions,
     })),
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    },
   });
 }
 
@@ -76,7 +105,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
   }
 
-  const { userId, role, tier, freeCredits = 0, paidCredits = 0 } = parsed.data;
+  const { userId, role, tier, freeCredits, paidCredits } = parsed.data;
 
   const updatedUser = await db.$transaction(async (tx) => {
     const existingUser = await tx.user.findUnique({
@@ -104,29 +133,18 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
-    if (freeCredits > 0) {
-      await grantCredits(
-        userId,
-        freeCredits,
-        CreditKind.FREE,
-        `admin-grant:${sessionUser.id}`,
-        "admin granted free credits",
-        tx,
-      );
-    }
+    const currentBalances = await syncUserCreditBalances(userId, tx);
+    const targetFreeCredits = freeCredits ?? currentBalances.freeCredits;
+    const targetPaidCredits = paidCredits ?? currentBalances.paidCredits;
 
-    if (paidCredits > 0) {
-      await grantCredits(
-        userId,
-        paidCredits,
-        CreditKind.PAID,
-        `admin-grant:${sessionUser.id}`,
-        "admin granted paid credits",
-        tx,
-      );
-    }
-
-    await syncUserCreditBalances(userId, tx);
+    await setUserCreditBalances(
+      userId,
+      targetFreeCredits,
+      targetPaidCredits,
+      `admin-set:${sessionUser.id}`,
+      "admin updated credit balances",
+      tx,
+    );
 
     return tx.user.findUniqueOrThrow({
       where: { id: userId },

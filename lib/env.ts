@@ -29,6 +29,9 @@ const envSchema = z.object({
   AUTH_SECRET: z.string().min(16),
   GOOGLE_CLIENT_ID: emptyStringToUndefined,
   GOOGLE_CLIENT_SECRET: emptyStringToUndefined,
+  BANK_TRANSFER_BANK_NAME: emptyStringToUndefined,
+  BANK_TRANSFER_ACCOUNT_NUMBER: emptyStringToUndefined,
+  SONGSAI_INTERNAL_SECRET: emptyStringToUndefined,
 });
 
 const parsedEnv = envSchema.safeParse({
@@ -41,6 +44,9 @@ const parsedEnv = envSchema.safeParse({
   AUTH_SECRET: process.env.AUTH_SECRET,
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+  BANK_TRANSFER_BANK_NAME: process.env.BANK_TRANSFER_BANK_NAME,
+  BANK_TRANSFER_ACCOUNT_NUMBER: process.env.BANK_TRANSFER_ACCOUNT_NUMBER,
+  SONGSAI_INTERNAL_SECRET: process.env.SONGSAI_INTERNAL_SECRET,
 });
 
 if (!parsedEnv.success) {

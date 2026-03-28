@@ -11,7 +11,7 @@ export const createMusicSchema = z.object({
   lyricMode: z.enum(["manual", "auto", "ai_lyrics"]).default("manual"),
   vocalGender: z.enum(["auto", "female", "male"]).default("auto"),
   trackCount: z.literal(1).default(1),
-  modelVersion: z.enum(["v4_5_plus", "v5"]).default("v5"),
+  modelVersion: z.enum(["v4_5_plus", "v5", "v5_5"]).default("v5_5"),
 });
 
 export type CreateMusicRequest = z.infer<typeof createMusicSchema>;

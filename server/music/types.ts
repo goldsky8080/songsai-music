@@ -6,7 +6,7 @@ export type CreateMusicInput = {
   lyricMode?: "manual" | "auto" | "ai_lyrics";
   vocalGender?: "auto" | "female" | "male";
   trackCount?: 1;
-  modelVersion?: "v4_5_plus" | "v5";
+  modelVersion?: "v4_5_plus" | "v5" | "v5_5";
   userId: string;
 };
 
@@ -15,11 +15,23 @@ export type ProviderMusicResult = {
   providerTaskId: string;
   status: "queued" | "processing" | "completed" | "failed";
   mp3Url?: string;
+  videoUrl?: string;
+  imageUrl?: string;
+  imageLargeUrl?: string;
+  generatedLyrics?: string;
+  providerPrompt?: string;
+  providerDescriptionPrompt?: string;
   errorMessage?: string;
   tracks?: Array<{
     providerTaskId: string;
     status: "queued" | "processing" | "completed" | "failed";
     mp3Url?: string;
+    videoUrl?: string;
+    imageUrl?: string;
+    imageLargeUrl?: string;
+    generatedLyrics?: string;
+    providerPrompt?: string;
+    providerDescriptionPrompt?: string;
   }>;
 };
 

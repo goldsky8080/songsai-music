@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
+import { TrackDownloadMenu } from "@/components/track-download-menu";
 
 type VocalGender = "auto" | "female" | "male";
 type LyricMode = "manual" | "ai_lyrics" | "auto";
-type ModelVersion = "v4_5_plus" | "v5";
+type ModelVersion = "v4_5_plus" | "v5" | "v5_5";
 type AutoLyricTopic = "love" | "hometown" | "family" | "life" | "comfort";
 type AutoLyricSituation = "separation" | "memory" | "hardship" | "late_night" | "hope";
 type AutoLyricEmotion = "yearning" | "regret" | "warmth" | "lonely" | "hopeful";
@@ -38,6 +39,7 @@ type MusicTrack = {
   id: string;
   status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED";
   mp3Url: string | null;
+  mp4Url?: string | null;
   downloadAvailableAt: string;
 };
 
@@ -155,6 +157,10 @@ function formatRemainingDownloadTimeFromNow(targetTime: string, now: number) {
   const seconds = remainingSeconds % 60;
 
   return `${minutes}:${String(seconds).padStart(2, "0")} 후 다운로드`;
+}
+
+function buildTrackPlaybackUrl(trackId: string) {
+  return `/api/music/${trackId}/download?inline=1`;
 }
 
 const MUSIC_GENERATION_COST = 500;
@@ -336,6 +342,38 @@ function buildAutoStylePrompt(input: {
   return parts.join(", ");
 }
 
+function buildAutoTitle(input: {
+  topic: AutoLyricTopic;
+  situation: AutoLyricSituation;
+  emotion: AutoLyricEmotion;
+  genre: AutoLyricGenre;
+  enabled: Record<AutoLyricToggleKey, boolean>;
+}) {
+  const titleParts: string[] = [];
+
+  if (input.enabled.topic) {
+    titleParts.push(autoLyricOptionLabels.topic[input.topic]);
+  }
+
+  if (input.enabled.emotion) {
+    titleParts.push(autoLyricOptionLabels.emotion[input.emotion]);
+  }
+
+  if (titleParts.length === 0 && input.enabled.situation) {
+    titleParts.push(autoLyricOptionLabels.situation[input.situation]);
+  }
+
+  if (titleParts.length === 0 && input.enabled.genre) {
+    titleParts.push(autoLyricOptionLabels.genre[input.genre]);
+  }
+
+  if (titleParts.length === 0) {
+    titleParts.push("자동 생성");
+  }
+
+  return titleParts.slice(0, 2).join("의 ");
+}
+
 export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
   const [message, setMessage] = useState("Google 계정으로 로그인하면 바로 작업 화면으로 이동합니다.");
   const [user, setUser] = useState<PublicUser | null>(null);
@@ -344,7 +382,7 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
   const [stylePrompt, setStylePrompt] = useState("");
   const [lyricMode, setLyricMode] = useState<LyricMode>("manual");
   const [vocalGender, setVocalGender] = useState<VocalGender>("auto");
-  const [modelVersion, setModelVersion] = useState<ModelVersion>("v5");
+  const [modelVersion, setModelVersion] = useState<ModelVersion>("v5_5");
   const [autoLyricTopic, setAutoLyricTopic] = useState<AutoLyricTopic>("hometown");
   const [autoLyricSituation, setAutoLyricSituation] = useState<AutoLyricSituation>("memory");
   const [autoLyricEmotion, setAutoLyricEmotion] = useState<AutoLyricEmotion>("yearning");
@@ -368,6 +406,8 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
   const [isPending, startTransition] = useTransition();
   const [isBooting, setIsBooting] = useState(true);
   const [messageTone, setMessageTone] = useState<"neutral" | "error" | "success">("neutral");
+  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
+  const [playingTrackUrl, setPlayingTrackUrl] = useState<string | null>(null);
 
   async function loadCurrentUser() {
     const response = await fetch("/api/me", {
@@ -395,6 +435,12 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
 
     const data = (await readJson(response)) as { items: MusicItem[] };
     setMusics(data.items);
+  }
+
+  async function reloadMusicAndUser() {
+    await loadMusicItems();
+    const refreshedUser = await loadCurrentUser();
+    setUser(refreshedUser);
   }
 
   useEffect(() => {
@@ -493,7 +539,15 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
         setMessageTone("neutral");
 
         const isAutoBuilder = lyricMode === "auto";
-        const effectiveTitle = isAutoBuilder ? "자동" : title;
+        const effectiveTitle = isAutoBuilder
+          ? buildAutoTitle({
+              topic: autoLyricTopic,
+              situation: autoLyricSituation,
+              emotion: autoLyricEmotion,
+              genre: autoLyricGenre,
+              enabled: autoLyricEnabled,
+            })
+          : title;
         const effectiveLyrics = isAutoBuilder
           ? buildAutoLyricPrompt({
               topic: autoLyricTopic,
@@ -538,15 +592,13 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
         });
 
         await readJson(response);
-        await loadMusicItems();
-        const refreshedUser = await loadCurrentUser();
-        setUser(refreshedUser);
+        await reloadMusicAndUser();
         setTitle("");
         setLyrics("");
         setStylePrompt("");
         setLyricMode("manual");
         setVocalGender("auto");
-        setModelVersion("v5");
+        setModelVersion("v5_5");
         setAutoLyricTopic("hometown");
         setAutoLyricSituation("memory");
         setAutoLyricEmotion("yearning");
@@ -590,14 +642,23 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
         });
 
         await readJson(response);
-        await loadMusicItems();
-        const refreshedUser = await loadCurrentUser();
-        setUser(refreshedUser);
+        await reloadMusicAndUser();
         setMessage("추가곡을 열었습니다.");
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "추가곡을 열지 못했습니다.");
       }
     });
+  }
+
+  function toggleTrackPlayback(trackId: string) {
+    if (playingTrackId === trackId) {
+      setPlayingTrackId(null);
+      setPlayingTrackUrl(null);
+      return;
+    }
+
+    setPlayingTrackId(trackId);
+    setPlayingTrackUrl(buildTrackPlaybackUrl(trackId));
   }
 
   const visibleMusics = musics.filter((item) => item.status !== "FAILED");
@@ -1088,6 +1149,12 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
                     activeClass: "bg-[#b64822] text-white border-[#b64822]",
                     idleClass: "border border-[#f0c3b4] bg-[#fff1eb] text-[#b64822]",
                   },
+                  {
+                    value: "v5_5" as ModelVersion,
+                    label: "골드",
+                    activeClass: "bg-[#b8860b] text-white border-[#b8860b]",
+                    idleClass: "border border-[#ead39a] bg-[#fff7df] text-[#9a6a07]",
+                  },
                 ].map((option) => (
                   <button
                     key={option.value}
@@ -1209,8 +1276,8 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
                 key={music.id}
                 className="rounded-[1rem] border border-[var(--border)] bg-[#fffdf9] px-3 py-3"
               >
-                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="min-w-0 lg:flex-1">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                  <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-[11px] text-[#8a7465]">{formatDate(music.createdAt)}</p>
                       <span
@@ -1222,29 +1289,33 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
                       </span>
                       <span className="text-[11px] text-[#8a7465]">{music.tracks.length}곡</span>
                     </div>
-                    <p className="mt-1 text-sm font-medium text-[#3f2f25]">{summarizeMusicLabel(music)}</p>
+                    <p className="mt-1 break-words text-sm font-medium text-[#3f2f25]">
+                      {summarizeMusicLabel(music)}
+                    </p>
                     <p className="mt-1 text-[11px] text-[#8a7465]">스타일 · {music.stylePrompt}</p>
                   </div>
 
-                  <div className="flex flex-wrap gap-2 lg:justify-end">
+                  <div className="flex flex-wrap gap-2 lg:justify-end lg:self-start">
                     {music.tracks.map((track, index) =>
                       track.mp3Url ? (
-                        <div key={track.id} className="flex gap-2">
-                          <a
-                            href={track.mp3Url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded-full border border-[var(--border)] bg-white px-3 py-2 text-[11px] font-semibold text-[#4e3b30]"
-                          >
-                            듣기 {index + 1}
-                          </a>
-                          {new Date(track.downloadAvailableAt).getTime() <= nowTs ? (
-                            <a
-                              href={`/api/music/${track.id}/download`}
-                              className="rounded-full bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white"
+                        <div key={track.id} className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleTrackPlayback(track.id)}
+                              className="rounded-full border border-[var(--border)] bg-white px-3 py-2 text-[11px] font-semibold text-[#4e3b30]"
                             >
-                              다운로드 {index + 1}
-                            </a>
+                            {playingTrackId === track.id ? `닫기 ${index + 1}` : `듣기 ${index + 1}`}
+                          </button>
+                          {new Date(track.downloadAvailableAt).getTime() <= nowTs ? (
+                            <>
+                              <TrackDownloadMenu
+                                trackId={track.id}
+                                trackIndex={index + 1}
+                                mp4Url={track.mp4Url}
+                                lyrics={music.lyrics}
+                                onCompleted={reloadMusicAndUser}
+                              />
+                            </>
                           ) : (
                             <span className="rounded-full border border-[var(--border)] bg-[#f7f2eb] px-3 py-2 text-[11px] text-[#8a7465]">
                               {formatRemainingDownloadTimeFromNow(track.downloadAvailableAt, nowTs)}
@@ -1279,6 +1350,19 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
                       ? ` · ${formatDateOnly(music.bonusUnlockExpiresAt)}까지 열기 가능`
                       : " · 추가곡 열기 기간이 지났습니다."}
                   </p>
+                ) : null}
+                {playingTrackId && music.tracks.some((track) => track.id === playingTrackId) && playingTrackUrl ? (
+                  <div className="mt-3 rounded-[1rem] border border-[var(--border)] bg-[#f8f3eb] px-3 py-3">
+                    <p className="mb-2 text-[11px] font-semibold text-[#6b5648]">현재 재생</p>
+                    <audio
+                      key={playingTrackId}
+                      controls
+                      autoPlay
+                      preload="metadata"
+                      src={playingTrackUrl}
+                      className="w-full"
+                    />
+                  </div>
                 ) : null}
               </article>
             ))

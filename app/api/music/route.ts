@@ -43,9 +43,84 @@ function toDbQueueStatus(status: "queued" | "processing" | "completed" | "failed
   }
 }
 
-type MusicRow = Awaited<ReturnType<typeof db.music.findMany>>[number];
+type MusicRow = Awaited<ReturnType<typeof db.music.findMany>>[number] & {
+  videos: Array<{
+    id: string;
+    mp4Url: string | null;
+    createdAt: Date;
+  }>;
+  generationJobs: Array<{
+    payload: unknown;
+    result: unknown;
+    updatedAt: Date;
+  }>;
+};
 
 const BONUS_TRACK_UNLOCK_WINDOW_MS = BONUS_TRACK_UNLOCK_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+function readGenerationContext(track: MusicRow) {
+  const latestJob = [...track.generationJobs].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
+  const payload =
+    latestJob?.payload && typeof latestJob.payload === "object"
+      ? (latestJob.payload as Record<string, unknown>)
+      : null;
+  const result =
+    latestJob?.result && typeof latestJob.result === "object"
+      ? (latestJob.result as Record<string, unknown>)
+      : null;
+
+  return {
+    title: typeof payload?.title === "string" && payload.title.trim().length > 0 ? payload.title.trim() : null,
+    lyricMode: typeof payload?.lyricMode === "string" ? payload.lyricMode : null,
+    generatedLyrics:
+      typeof result?.generatedLyrics === "string" && result.generatedLyrics.trim().length > 0
+        ? result.generatedLyrics
+        : typeof result?.providerPrompt === "string" && result.providerPrompt.trim().length > 0
+          ? result.providerPrompt
+          : null,
+    providerDescriptionPrompt:
+      typeof result?.providerDescriptionPrompt === "string" ? result.providerDescriptionPrompt : null,
+  };
+}
+
+function buildDisplayTitle(input: {
+  storedTitle: string | null;
+  generatedLyrics: string | null;
+  requestLyrics: string;
+  stylePrompt: string;
+  lyricMode: string | null;
+}) {
+  const storedTitle = input.storedTitle?.trim();
+
+  if (storedTitle && storedTitle !== "자동") {
+    return storedTitle;
+  }
+
+  const lyricSource = input.generatedLyrics?.trim() || (input.lyricMode === "manual" ? input.requestLyrics.trim() : "");
+  if (lyricSource) {
+    const lines = lyricSource
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !/^\[[^\]]+\]$/.test(line));
+    const firstLine = lines[0];
+
+    if (firstLine) {
+      return firstLine.length > 28 ? `${firstLine.slice(0, 28)}...` : firstLine;
+    }
+  }
+
+  const styleParts = input.stylePrompt
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .slice(0, 2);
+
+  if (styleParts.length > 0) {
+    return styleParts.join(" · ");
+  }
+
+  return "제목 없는 곡";
+}
 
 function summarizeGroupStatus(statuses: MusicStatus[]) {
   if (statuses.some((status) => status === MusicStatus.PROCESSING)) {
@@ -85,6 +160,7 @@ function groupMusicItems(musics: MusicRow[]) {
     .map(([groupId, tracks]) => {
       const sortedTracks = [...tracks].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       const first = sortedTracks[0];
+      const generationContext = readGenerationContext(first);
       const statuses = sortedTracks.map((track) => track.status);
       const errorMessage = sortedTracks.find((track) => track.errorMessage)?.errorMessage ?? null;
       const hiddenBonusTracks = sortedTracks.filter(
@@ -97,10 +173,24 @@ function groupMusicItems(musics: MusicRow[]) {
       const canUnlockBonusTrack =
         hiddenBonusTracks.length > 0 && bonusUnlockExpiresAt.getTime() > Date.now();
 
+      const effectiveLyrics =
+        generationContext.generatedLyrics ??
+        (generationContext.lyricMode === "manual" ? first.lyrics : "실제 가사를 준비 중입니다.");
+      const displayTitle = buildDisplayTitle({
+        storedTitle: generationContext.title,
+        generatedLyrics: generationContext.generatedLyrics,
+        requestLyrics: first.lyrics,
+        stylePrompt: first.stylePrompt,
+        lyricMode: generationContext.lyricMode,
+      });
+
       return {
         id: groupId,
-        title: null,
-        lyrics: first.lyrics,
+        title: displayTitle,
+        lyrics: effectiveLyrics,
+        requestLyrics: first.lyrics,
+        generatedLyrics: generationContext.generatedLyrics,
+        lyricMode: generationContext.lyricMode,
         stylePrompt: first.stylePrompt,
         status: summarizeGroupStatus(statuses),
         createdAt: first.createdAt,
@@ -109,7 +199,11 @@ function groupMusicItems(musics: MusicRow[]) {
           id: track.id,
           status: track.status,
           mp3Url: track.mp3Url,
-          downloadAvailableAt: new Date(track.updatedAt.getTime() + DOWNLOAD_DELAY_MS),
+          mp4Url:
+            [...track.videos]
+              .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+              .find((video) => Boolean(video.mp4Url))?.mp4Url ?? null,
+          downloadAvailableAt: new Date(track.createdAt.getTime() + DOWNLOAD_DELAY_MS),
         })),
         hiddenBonusTrackCount: hiddenBonusTracks.length,
         canUnlockBonusTrack,
@@ -138,6 +232,29 @@ export async function GET(request: NextRequest) {
   const musics = await db.music.findMany({
     where: {
       userId: sessionUser.id,
+    },
+    include: {
+      videos: {
+        select: {
+          id: true,
+          mp4Url: true,
+          createdAt: true,
+        },
+      },
+      generationJobs: {
+        where: {
+          jobType: "MUSIC_GENERATION",
+        },
+        select: {
+          payload: true,
+          result: true,
+          updatedAt: true,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+        take: 1,
+      },
     },
     orderBy: {
       createdAt: "desc",
@@ -250,6 +367,7 @@ export async function POST(request: Request) {
               providerTaskId: providerResult.providerTaskId,
               status: providerResult.status,
               mp3Url: providerResult.mp3Url,
+              videoUrl: providerResult.videoUrl,
             },
           ];
 
@@ -257,7 +375,7 @@ export async function POST(request: Request) {
 
     const [primaryTrack, ...extraTracks] = selectedTracks;
 
-    const items = await db.$transaction(async (tx) => {
+      const items = await db.$transaction(async (tx) => {
       const primaryMusic = await tx.music.update({
         where: { id: created.id },
         data: {
@@ -265,6 +383,14 @@ export async function POST(request: Request) {
           status: toDbMusicStatus(primaryTrack.status),
           mp3Url: primaryTrack.mp3Url ?? null,
           errorMessage: providerResult.errorMessage ?? null,
+          videos: primaryTrack.videoUrl
+            ? {
+                create: {
+                  mp4Url: primaryTrack.videoUrl,
+                  status: "COMPLETED",
+                },
+              }
+            : undefined,
         },
       });
 
@@ -275,10 +401,14 @@ export async function POST(request: Request) {
         },
         data: {
           queueStatus: toDbQueueStatus(primaryTrack.status),
-          result: {
-            providerTaskId: primaryTrack.providerTaskId,
-            status: primaryTrack.status,
-            mp3Url: primaryTrack.mp3Url ?? null,
+              result: {
+                providerTaskId: primaryTrack.providerTaskId,
+                status: primaryTrack.status,
+                mp3Url: primaryTrack.mp3Url ?? null,
+                videoUrl: primaryTrack.videoUrl ?? null,
+                generatedLyrics: primaryTrack.generatedLyrics ?? null,
+                providerPrompt: primaryTrack.providerPrompt ?? null,
+                providerDescriptionPrompt: primaryTrack.providerDescriptionPrompt ?? null,
           },
           errorMessage: providerResult.errorMessage ?? null,
         },
@@ -298,6 +428,14 @@ export async function POST(request: Request) {
               status: toDbMusicStatus(track.status),
               mp3Url: track.mp3Url ?? null,
               errorMessage: providerResult.errorMessage ?? null,
+              videos: track.videoUrl
+                ? {
+                    create: {
+                      mp4Url: track.videoUrl,
+                      status: "COMPLETED",
+                    },
+                  }
+                : undefined,
             },
           });
 
@@ -323,6 +461,10 @@ export async function POST(request: Request) {
                 providerTaskId: track.providerTaskId,
                 status: track.status,
                 mp3Url: track.mp3Url ?? null,
+                videoUrl: track.videoUrl ?? null,
+                generatedLyrics: track.generatedLyrics ?? null,
+                providerPrompt: track.providerPrompt ?? null,
+                providerDescriptionPrompt: track.providerDescriptionPrompt ?? null,
               },
               errorMessage: providerResult.errorMessage ?? null,
             },
@@ -332,10 +474,44 @@ export async function POST(request: Request) {
         }),
       );
 
-      return [primaryMusic, ...extraMusics];
+      return [primaryMusic.id, ...extraMusics.map((music) => music.id)];
     });
 
-    return NextResponse.json({ items: groupMusicItems(items) }, { status: 201 });
+    const createdItems = await db.music.findMany({
+      where: {
+        id: {
+          in: items,
+        },
+      },
+      include: {
+        videos: {
+          select: {
+            id: true,
+            mp4Url: true,
+            createdAt: true,
+          },
+        },
+        generationJobs: {
+          where: {
+            jobType: "MUSIC_GENERATION",
+          },
+          select: {
+            payload: true,
+            result: true,
+            updatedAt: true,
+          },
+          orderBy: {
+            updatedAt: "desc",
+          },
+          take: 1,
+        },
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+
+    return NextResponse.json({ items: groupMusicItems(createdItems) }, { status: 201 });
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Music generation request failed.";
