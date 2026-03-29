@@ -64,8 +64,18 @@ export function VideoRenderControls({
   const [showLyrics, setShowLyrics] = useState(true);
   const [showTitle, setShowTitle] = useState(true);
   const [renderingVideoId, setRenderingVideoId] = useState<string | null>(null);
+  const [downloadVideoId, setDownloadVideoId] = useState<string | null>(latestVideoId ?? null);
+  const [hasDownloadableVideo, setHasDownloadableVideo] = useState(Boolean(mp4Url));
 
   const videoCost = showLyrics ? LYRICS_VIDEO_COST : BASE_VIDEO_COST;
+
+  useEffect(() => {
+    setDownloadVideoId(latestVideoId ?? null);
+  }, [latestVideoId]);
+
+  useEffect(() => {
+    setHasDownloadableVideo(Boolean(mp4Url));
+  }, [mp4Url]);
 
   useEffect(() => {
     onCompletedRef.current = onCompleted;
@@ -175,6 +185,8 @@ export function VideoRenderControls({
           setProgress(100);
           setStatusText("완료되었습니다. 비디오를 다운로드합니다.");
           setSelectedFile(null);
+          setDownloadVideoId(renderingVideoId);
+          setHasDownloadableVideo(true);
           setRenderingVideoId(null);
           if (inputRef.current) {
             inputRef.current.value = "";
@@ -295,9 +307,9 @@ export function VideoRenderControls({
             ? `비디오+${videoCost}`
             : `커버로 비디오+${videoCost}`}
       </button>
-      {mp4Url ? (
+      {hasDownloadableVideo && downloadVideoId ? (
         <a
-          href={buildVideoDownloadUrl(musicId, latestVideoId)}
+          href={buildVideoDownloadUrl(musicId, downloadVideoId)}
           download
           className="rounded-full bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white"
         >
