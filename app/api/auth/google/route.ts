@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { buildOAuthStateCookieOptions, GOOGLE_AUTH_STATE_COOKIE_NAME } from "@/lib/auth";
 import { env } from "@/lib/env";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function buildGoogleRedirectUri() {
   if (!env.APP_URL) {
     throw new Error("APP_URL is required for Google login.");
@@ -28,6 +31,8 @@ export async function GET() {
   url.searchParams.set("prompt", "select_account");
 
   const response = NextResponse.redirect(url);
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  response.headers.set("Pragma", "no-cache");
   response.cookies.set({
     name: GOOGLE_AUTH_STATE_COOKIE_NAME,
     value: state,

@@ -12,6 +12,9 @@ import {
 import { env } from "@/lib/env";
 import { grantSignupCredits } from "@/server/credits/service";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type GoogleTokenResponse = {
   access_token: string;
   id_token?: string;
@@ -39,7 +42,10 @@ function buildGoogleRedirectUri() {
 function buildErrorRedirect(message: string) {
   const url = new URL(env.APP_URL ?? "http://localhost:3000");
   url.searchParams.set("authError", message);
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url);
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  response.headers.set("Pragma", "no-cache");
+  return response;
 }
 
 export async function GET(request: NextRequest) {
@@ -141,6 +147,8 @@ export async function GET(request: NextRequest) {
   });
 
   const response = NextResponse.redirect(new URL("/", env.APP_URL ?? "http://localhost:3000"));
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  response.headers.set("Pragma", "no-cache");
 
   response.cookies.set({
     name: AUTH_COOKIE_NAME,
