@@ -39,5 +39,11 @@ export async function GET() {
     ...buildOAuthStateCookieOptions(60 * 10),
   });
 
+  console.info("[auth/google] oauth start", {
+    redirectUri,
+    hasClientId: Boolean(env.GOOGLE_CLIENT_ID),
+    statePreview: state.slice(0, 8),
+  });
+
   return response;
 }

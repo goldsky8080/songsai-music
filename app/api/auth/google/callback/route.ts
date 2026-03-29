@@ -59,11 +59,32 @@ export async function GET(request: NextRequest) {
   const state = request.nextUrl.searchParams.get("state");
   const oauthError = request.nextUrl.searchParams.get("error");
 
+  console.info("[auth/google/callback] received", {
+    hasCode: Boolean(code),
+    hasState: Boolean(state),
+    hasExpectedState: Boolean(expectedState),
+    statePreview: state?.slice(0, 8) ?? null,
+    expectedStatePreview: expectedState?.slice(0, 8) ?? null,
+    cookieNames: cookieStore.getAll().map((cookie) => cookie.name),
+    host: request.headers.get("host"),
+    forwardedHost: request.headers.get("x-forwarded-host"),
+    forwardedProto: request.headers.get("x-forwarded-proto"),
+    userAgent: request.headers.get("user-agent"),
+  });
+
   if (oauthError) {
+    console.warn("[auth/google/callback] oauth provider error", { oauthError });
     return buildErrorRedirect("google_login_cancelled");
   }
 
   if (!code || !state || !expectedState || state !== expectedState) {
+    console.warn("[auth/google/callback] state validation failed", {
+      hasCode: Boolean(code),
+      hasState: Boolean(state),
+      hasExpectedState: Boolean(expectedState),
+      statePreview: state?.slice(0, 8) ?? null,
+      expectedStatePreview: expectedState?.slice(0, 8) ?? null,
+    });
     return buildErrorRedirect("google_state_invalid");
   }
 
@@ -82,6 +103,10 @@ export async function GET(request: NextRequest) {
   });
 
   if (!tokenResponse.ok) {
+    console.warn("[auth/google/callback] token exchange failed", {
+      status: tokenResponse.status,
+      statusText: tokenResponse.statusText,
+    });
     return buildErrorRedirect("google_token_failed");
   }
 
@@ -94,12 +119,20 @@ export async function GET(request: NextRequest) {
   });
 
   if (!userInfoResponse.ok) {
+    console.warn("[auth/google/callback] userinfo failed", {
+      status: userInfoResponse.status,
+      statusText: userInfoResponse.statusText,
+    });
     return buildErrorRedirect("google_userinfo_failed");
   }
 
   const userInfo = (await userInfoResponse.json()) as GoogleUserInfo;
 
   if (!userInfo.email || !userInfo.email_verified) {
+    console.warn("[auth/google/callback] email not verified", {
+      hasEmail: Boolean(userInfo.email),
+      emailVerified: userInfo.email_verified,
+    });
     return buildErrorRedirect("google_email_not_verified");
   }
 
@@ -160,6 +193,11 @@ export async function GET(request: NextRequest) {
     name: GOOGLE_AUTH_STATE_COOKIE_NAME,
     value: "",
     ...buildOAuthStateCookieOptions(0),
+  });
+
+  console.info("[auth/google/callback] login success", {
+    userId: user.id,
+    email,
   });
 
   return response;
