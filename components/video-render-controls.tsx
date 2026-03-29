@@ -7,6 +7,7 @@ type VideoRenderControlsProps = {
   trackIndex: number;
   mp4Url: string | null | undefined;
   title: string;
+  isMr?: boolean;
   onCompleted?: () => Promise<void> | void;
 };
 
@@ -42,6 +43,7 @@ export function VideoRenderControls({
   trackIndex,
   mp4Url,
   title,
+  isMr = false,
   onCompleted,
 }: VideoRenderControlsProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -61,6 +63,12 @@ export function VideoRenderControls({
   useEffect(() => {
     onCompletedRef.current = onCompleted;
   }, [onCompleted]);
+
+  useEffect(() => {
+    if (isMr && showLyrics) {
+      setShowLyrics(false);
+    }
+  }, [isMr, showLyrics]);
 
   useEffect(() => {
     return () => {
@@ -294,6 +302,7 @@ export function VideoRenderControls({
         <input
           type="checkbox"
           checked={showLyrics}
+          disabled={isMr}
           onChange={(event) => setShowLyrics(event.target.checked)}
           className="h-3.5 w-3.5"
         />

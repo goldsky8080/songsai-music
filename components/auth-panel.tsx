@@ -47,6 +47,7 @@ type MusicItem = {
   id: string;
   title: string | null;
   lyrics: string;
+  isMr?: boolean;
   stylePrompt: string;
   status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED";
   createdAt: string;
@@ -1336,6 +1337,7 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
                                 mp4Url={track.mp4Url}
                                 title={music.title ?? "제목 없는 곡"}
                                 lyrics={music.lyrics}
+                                isMr={music.isMr}
                                 onCompleted={reloadMusicAndUser}
                               />
                             </>

@@ -120,6 +120,7 @@ model Music {
   requestGroupId String?
   lyrics         String
   stylePrompt    String
+  isMr           Boolean         @default(false)
   provider       String
   providerTaskId String?         @unique
   mp3Url         String?

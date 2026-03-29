@@ -16,6 +16,7 @@ type MusicItem = {
   id: string;
   title: string | null;
   lyrics: string;
+  isMr?: boolean;
   stylePrompt: string;
   status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED";
   createdAt: string;
@@ -232,6 +233,7 @@ export default function MusicHistoryPage() {
                                   mp4Url={track.mp4Url}
                                   title={item.title ?? "제목 없는 곡"}
                                   lyrics={item.lyrics}
+                                  isMr={item.isMr}
                                   onCompleted={() => loadPage(pagination.page)}
                                 />
                               </>

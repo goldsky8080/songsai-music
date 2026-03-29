@@ -9,6 +9,7 @@ type TrackDownloadMenuProps = {
   mp4Url?: string | null;
   title: string;
   lyrics: string;
+  isMr?: boolean;
   onCompleted?: () => Promise<void> | void;
 };
 
@@ -18,6 +19,7 @@ export function TrackDownloadMenu({
   mp4Url,
   title,
   lyrics,
+  isMr = false,
   onCompleted,
 }: TrackDownloadMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -73,6 +75,7 @@ export function TrackDownloadMenu({
                   trackIndex={trackIndex}
                   mp4Url={mp4Url}
                   title={title}
+                  isMr={isMr}
                   onCompleted={onCompleted}
                 />
               </div>
