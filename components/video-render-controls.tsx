@@ -47,6 +47,7 @@ export function VideoRenderControls({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const progressTimerRef = useRef<number | null>(null);
   const pollingTimerRef = useRef<number | null>(null);
+  const onCompletedRef = useRef<VideoRenderControlsProps["onCompleted"]>(onCompleted);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isRendering, setIsRendering] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -56,6 +57,10 @@ export function VideoRenderControls({
   const [renderingVideoId, setRenderingVideoId] = useState<string | null>(null);
 
   const videoCost = showLyrics ? LYRICS_VIDEO_COST : BASE_VIDEO_COST;
+
+  useEffect(() => {
+    onCompletedRef.current = onCompleted;
+  }, [onCompleted]);
 
   useEffect(() => {
     return () => {
@@ -147,7 +152,7 @@ export function VideoRenderControls({
         const nextMp4Url = typeof item.mp4Url === "string" ? item.mp4Url : null;
         const errorMessage = typeof item.errorMessage === "string" ? item.errorMessage : null;
 
-        await onCompleted?.();
+        await onCompletedRef.current?.();
 
         if (status === "COMPLETED" && nextMp4Url) {
           stopPolling();
@@ -196,7 +201,7 @@ export function VideoRenderControls({
     return () => {
       stopPolling();
     };
-  }, [isRendering, renderingVideoId, musicId, onCompleted]);
+  }, [isRendering, renderingVideoId, musicId]);
 
   function handleCreateVideo() {
     setIsRendering(true);
