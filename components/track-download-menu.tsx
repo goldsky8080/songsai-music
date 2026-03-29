@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { VideoRenderControls } from "@/components/video-render-controls";
@@ -7,6 +7,7 @@ type TrackDownloadMenuProps = {
   trackId: string;
   trackIndex: number;
   mp4Url?: string | null;
+  title: string;
   lyrics: string;
   onCompleted?: () => Promise<void> | void;
 };
@@ -15,6 +16,7 @@ export function TrackDownloadMenu({
   trackId,
   trackIndex,
   mp4Url,
+  title,
   lyrics,
   onCompleted,
 }: TrackDownloadMenuProps) {
@@ -70,6 +72,7 @@ export function TrackDownloadMenu({
                   musicId={trackId}
                   trackIndex={trackIndex}
                   mp4Url={mp4Url}
+                  title={title}
                   onCompleted={onCompleted}
                 />
               </div>

@@ -8,7 +8,6 @@ import {
 import {
   ADDITIONAL_TRACK_UNLOCK_COST,
   getMusicGenerationCost,
-  VIDEO_RENDER_COST,
 } from "@/server/music/constants";
 
 function addDays(date: Date, days: number) {
@@ -376,9 +375,10 @@ export async function consumeAdditionalTrackUnlockCredits(
 export async function consumeVideoRenderCredits(
   userId: string,
   videoId: string,
+  amount: number,
   tx: Prisma.TransactionClient,
 ) {
-  return consumeCredits(userId, VIDEO_RENDER_COST, `video_render:${videoId}`, tx);
+  return consumeCredits(userId, amount, `video_render:${videoId}`, tx);
 }
 
 async function refundUsageCreditsByMemo(userId: string, usageMemo: string, refundMemoPrefix: string) {

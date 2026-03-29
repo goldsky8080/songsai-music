@@ -2,7 +2,8 @@
 import { QueueStatus, VideoStatus } from "@prisma/client";
 import { getSessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { DOWNLOAD_DELAY_MS } from "@/server/music/constants";
+import { DOWNLOAD_DELAY_MS, getVideoRenderCost } from "@/server/music/constants";
+import { buildAlignedLyricLines } from "@/server/music/aligned-lyrics";
 import { getMusicProvider } from "@/server/music/provider";
 import { consumeVideoRenderCredits, refundVideoRenderCredits } from "@/server/credits/service";
 import { renderVideoFromImage } from "@/server/video/render";
@@ -15,6 +16,15 @@ type RouteContext = {
   }>;
 };
 
+function readTitleFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const title = (payload as { title?: unknown }).title;
+  return typeof title === "string" && title.trim().length > 0 ? title.trim() : null;
+}
+
 export async function POST(request: Request, context: RouteContext) {
   const sessionUser = await getSessionUser();
 
@@ -25,7 +35,12 @@ export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const formData = await request.formData();
   const imageFile = formData.get("image");
+  const showLyrics = formData.get("showLyrics") !== "false";
+  const showTitle = formData.get("showTitle") !== "false";
+  const rawTitleText = formData.get("titleText");
+  const titleText = typeof rawTitleText === "string" ? rawTitleText.trim() : "";
   const hasUploadedImage = imageFile instanceof File && imageFile.size > 0;
+  const videoRenderCost = getVideoRenderCost(showLyrics);
 
   if (imageFile !== null && imageFile !== undefined && !(imageFile instanceof File)) {
     return NextResponse.json({ error: "이미지 파일 형식을 확인해 주세요." }, { status: 400 });
@@ -47,7 +62,18 @@ export async function POST(request: Request, context: RouteContext) {
       mp3Url: true,
       providerTaskId: true,
       createdAt: true,
-      updatedAt: true,
+      generationJobs: {
+        where: {
+          jobType: "MUSIC_GENERATION",
+        },
+        select: {
+          payload: true,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+        take: 1,
+      },
       videos: {
         where: {
           status: {
@@ -88,11 +114,15 @@ export async function POST(request: Request, context: RouteContext) {
 
   let resolvedAudioUrl = music.mp3Url;
   let providerImageUrl: string | null = null;
+  let alignedLyricLines = [] as ReturnType<typeof buildAlignedLyricLines>;
 
   if (music.providerTaskId) {
     try {
       const provider = getMusicProvider();
       const latest = await provider.getMusicStatus(music.providerTaskId);
+      const alignedWords = showLyrics
+        ? await provider.getAlignedLyrics(music.providerTaskId).catch(() => [])
+        : [];
 
       if (latest.mp3Url && latest.mp3Url !== music.mp3Url) {
         resolvedAudioUrl = latest.mp3Url;
@@ -106,6 +136,7 @@ export async function POST(request: Request, context: RouteContext) {
       }
 
       providerImageUrl = latest.imageLargeUrl ?? latest.imageUrl ?? null;
+      alignedLyricLines = showLyrics ? buildAlignedLyricLines(alignedWords) : [];
     } catch (error) {
       console.warn("[video-render] Failed to refresh provider status", {
         musicId: music.id,
@@ -122,6 +153,14 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
+  if (showLyrics && alignedLyricLines.length === 0) {
+    return NextResponse.json(
+      { error: "가사 타이밍을 준비하지 못해 가사 자막 비디오를 만들 수 없습니다." },
+      { status: 409 },
+    );
+  }
+
+  const resolvedTitleText = titleText || readTitleFromPayload(music.generationJobs[0]?.payload) || "제목 없는 곡";
   const imageBuffer = hasUploadedImage ? Buffer.from(await imageFile.arrayBuffer()) : undefined;
 
   const created = await db.$transaction(async (tx) => {
@@ -132,7 +171,7 @@ export async function POST(request: Request, context: RouteContext) {
       },
     });
 
-    await consumeVideoRenderCredits(sessionUser.id, video.id, tx);
+    await consumeVideoRenderCredits(sessionUser.id, video.id, videoRenderCost, tx);
 
     await tx.generationJob.create({
       data: {
@@ -147,6 +186,10 @@ export async function POST(request: Request, context: RouteContext) {
           imageName: hasUploadedImage ? imageFile.name : null,
           imageMimeType: hasUploadedImage ? imageFile.type : null,
           imageUrl: providerImageUrl,
+          showLyrics,
+          showTitle,
+          titleText: resolvedTitleText,
+          cost: videoRenderCost,
         },
       },
     });
@@ -161,6 +204,8 @@ export async function POST(request: Request, context: RouteContext) {
       imageBuffer,
       imageMimeType: hasUploadedImage ? imageFile.type : undefined,
       imageUrl: hasUploadedImage ? undefined : providerImageUrl ?? undefined,
+      alignedLyricLines: showLyrics ? alignedLyricLines : [],
+      titleText: showTitle ? resolvedTitleText : undefined,
     });
 
     const updated = await db.video.update({

@@ -1,5 +1,5 @@
 ﻿import { env } from "@/lib/env";
-import type { CreateMusicInput, ProviderMusicResult } from "./types";
+import type { CreateMusicInput, ProviderAlignedLyricWord, ProviderMusicResult } from "./types";
 
 /**
  * 음악 생성 공급자 인터페이스.
@@ -11,6 +11,7 @@ import type { CreateMusicInput, ProviderMusicResult } from "./types";
 export interface MusicProvider {
   createMusic(input: CreateMusicInput): Promise<ProviderMusicResult>;
   getMusicStatus(taskId: string): Promise<ProviderMusicResult>;
+  getAlignedLyrics(taskId: string): Promise<ProviderAlignedLyricWord[]>;
   cancelMusic(taskId: string): Promise<void>;
 }
 
@@ -82,6 +83,10 @@ class MockMusicProvider implements MusicProvider {
     };
   }
 
+  async getAlignedLyrics(_: string): Promise<ProviderAlignedLyricWord[]> {
+    return [];
+  }
+
   async cancelMusic(_: string): Promise<void> {}
 }
 
@@ -106,6 +111,7 @@ export class SongsProvider implements MusicProvider {
     const tags = buildStyleTags(input.stylePrompt, vocalGender);
     const songsModel = resolveModelVersion(input.modelVersion);
     const isAutoLyrics = input.lyricMode !== "manual";
+    const isMrMode = input.isMr === true;
     const autoLyricsPrompt = input.stylePrompt.trim()
       ? `${input.lyrics.trim()}\n스타일은 ${tags} 느낌으로 만들어줘.`
       : input.lyrics;
@@ -124,6 +130,7 @@ export class SongsProvider implements MusicProvider {
           inferredVocalGender: vocalGender,
           stylePrompt: input.stylePrompt,
           tags,
+          isMrMode,
           isAutoLyrics,
           autoLyricsPrompt: isAutoLyrics ? autoLyricsPrompt : undefined,
         },
@@ -132,7 +139,25 @@ export class SongsProvider implements MusicProvider {
       ),
     );
 
-    const payload = isAutoLyrics
+    const payload = isMrMode
+      ? {
+          title: input.title,
+          prompt: "",
+          tags,
+          negative_tags: "Lyrics",
+          generation_type: "TEXT",
+          make_instrumental: true,
+          wait_audio: false,
+          mv: songsModel,
+          metadata: {
+            create_mode: "custom",
+            is_custom: true,
+            mv: songsModel,
+            vocal_gender: vocalGender,
+            web_client_pathname: "/create",
+          },
+        }
+      : isAutoLyrics
       ? {
           title: input.title,
           prompt: "",
@@ -297,6 +322,47 @@ export class SongsProvider implements MusicProvider {
       providerDescriptionPrompt: data[0]?.gpt_description_prompt,
       errorMessage: data.find((item) => item.error_message)?.error_message,
     };
+  }
+
+  async getAlignedLyrics(taskId: string): Promise<ProviderAlignedLyricWord[]> {
+    if (!env.SONGS_API_BASE_URL) {
+      throw new Error("SONGS API provider is not configured.");
+    }
+
+    const response = await fetch(
+      `${env.SONGS_API_BASE_URL}/api/get_aligned_lyrics?song_id=${encodeURIComponent(taskId)}`,
+      {
+        headers: this.buildHeaders(),
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`SONGS API aligned lyrics lookup failed. ${errorText}`);
+    }
+
+    const data = (await response.json()) as Array<{
+      word?: string;
+      start_s?: number;
+      end_s?: number;
+    }>;
+
+    if (!Array.isArray(data)) {
+      throw new Error("SONGS API provider returned invalid aligned lyrics data.");
+    }
+
+    return data
+      .filter(
+        (item): item is { word: string; start_s: number; end_s: number } =>
+          typeof item.word === "string" &&
+          typeof item.start_s === "number" &&
+          typeof item.end_s === "number",
+      )
+      .map((item) => ({
+        word: item.word,
+        start_s: item.start_s,
+        end_s: item.end_s,
+      }));
   }
 
   async cancelMusic(taskId: string): Promise<void> {

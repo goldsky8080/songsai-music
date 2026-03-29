@@ -4,6 +4,7 @@ export type CreateMusicInput = {
   lyrics: string;
   stylePrompt: string;
   lyricMode?: "manual" | "auto" | "ai_lyrics";
+  isMr?: boolean;
   vocalGender?: "auto" | "female" | "male";
   trackCount?: 1;
   modelVersion?: "v4_5_plus" | "v5" | "v5_5";
@@ -33,6 +34,12 @@ export type ProviderMusicResult = {
     providerPrompt?: string;
     providerDescriptionPrompt?: string;
   }>;
+};
+
+export type ProviderAlignedLyricWord = {
+  word: string;
+  start_s: number;
+  end_s: number;
 };
 
 // 향후 워커/배치 처리로 확장할 때 재사용 가능한 최소 상태 스냅샷 타입.

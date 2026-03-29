@@ -381,6 +381,7 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
   const [lyrics, setLyrics] = useState("");
   const [stylePrompt, setStylePrompt] = useState("");
   const [lyricMode, setLyricMode] = useState<LyricMode>("manual");
+  const [isMr, setIsMr] = useState(false);
   const [vocalGender, setVocalGender] = useState<VocalGender>("auto");
   const [modelVersion, setModelVersion] = useState<ModelVersion>("v5_5");
   const [autoLyricTopic, setAutoLyricTopic] = useState<AutoLyricTopic>("hometown");
@@ -485,6 +486,12 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
   }, []);
 
   useEffect(() => {
+    if (isMr && lyricMode === "ai_lyrics") {
+      setLyricMode("manual");
+    }
+  }, [isMr, lyricMode]);
+
+  useEffect(() => {
     if (!user) {
       return;
     }
@@ -535,6 +542,10 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
 
     startTransition(async () => {
       try {
+        if (isMr) {
+          alert("MR모드로 생성됩니다.");
+        }
+
         setMessage("음악 생성 요청을 등록하는 중입니다...");
         setMessageTone("neutral");
 
@@ -585,6 +596,7 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
             lyrics: effectiveLyrics,
             stylePrompt: effectiveStylePrompt,
             lyricMode,
+            isMr,
             vocalGender,
             trackCount: 1,
             modelVersion,
@@ -597,6 +609,7 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
         setLyrics("");
         setStylePrompt("");
         setLyricMode("manual");
+        setIsMr(false);
         setVocalGender("auto");
         setModelVersion("v5_5");
         setAutoLyricTopic("hometown");
@@ -792,7 +805,7 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
               <div className="flex flex-wrap gap-2">
                 {[
                   { value: "manual", label: "직접 입력" },
-                  { value: "ai_lyrics", label: "AI가사" },
+                  ...(!isMr ? [{ value: "ai_lyrics", label: "AI가사" }] : []),
                   { value: "auto", label: "AI 자동 생성" },
                 ].map((option) => (
                   <button
@@ -812,6 +825,15 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
                 ))}
               </div>
             </div>
+
+            <label className="flex items-center gap-2 text-sm font-medium text-[#3b2a20]">
+              <input
+                type="checkbox"
+                checked={isMr}
+                onChange={(event) => setIsMr(event.target.checked)}
+              />
+              <span>MR 생성</span>
+            </label>
 
             {lyricMode === "auto" ? (
               <div className="rounded-[1.3rem] border border-[var(--border)] bg-[#fffaf4] p-4">
@@ -1203,7 +1225,7 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
               isPending ||
               !hasEnoughCreditsForGeneration ||
               (lyricMode !== "auto" && title.trim().length < 1) ||
-              (lyricMode !== "auto" && lyrics.trim().length < 10) ||
+              (!isMr && lyricMode !== "auto" && lyrics.trim().length < 10) ||
               (lyricMode !== "auto" && stylePrompt.trim().length < 2)
             }
             className="mt-5 w-full rounded-[1.3rem] bg-[var(--accent)] px-5 py-4 text-base font-semibold text-white shadow-[0_14px_30px_rgba(182,72,34,0.22)] disabled:opacity-60"
@@ -1312,6 +1334,7 @@ export function AuthPanel({ showAllMusicList = false }: AuthPanelProps) {
                                 trackId={track.id}
                                 trackIndex={index + 1}
                                 mp4Url={track.mp4Url}
+                                title={music.title ?? "제목 없는 곡"}
                                 lyrics={music.lyrics}
                                 onCompleted={reloadMusicAndUser}
                               />

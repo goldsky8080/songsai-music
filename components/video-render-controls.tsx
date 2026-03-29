@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useState } from "react";
 
@@ -6,8 +6,12 @@ type VideoRenderControlsProps = {
   musicId: string;
   trackIndex: number;
   mp4Url: string | null | undefined;
+  title: string;
   onCompleted?: () => Promise<void> | void;
 };
+
+const BASE_VIDEO_COST = 100;
+const LYRICS_VIDEO_COST = 300;
 
 async function readJson(response: Response) {
   const data = (await response.json()) as Record<string, unknown>;
@@ -37,6 +41,7 @@ export function VideoRenderControls({
   musicId,
   trackIndex,
   mp4Url,
+  title,
   onCompleted,
 }: VideoRenderControlsProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -45,6 +50,10 @@ export function VideoRenderControls({
   const [isRendering, setIsRendering] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState<string | null>(null);
+  const [showLyrics, setShowLyrics] = useState(true);
+  const [showTitle, setShowTitle] = useState(true);
+
+  const videoCost = showLyrics ? LYRICS_VIDEO_COST : BASE_VIDEO_COST;
 
   useEffect(() => {
     return () => {
@@ -69,17 +78,17 @@ export function VideoRenderControls({
     progressTimerRef.current = window.setInterval(() => {
       setProgress((current) => {
         if (current < 28) {
-          setStatusText("커버 이미지와 오디오를 불러오는 중입니다.");
+          setStatusText("커버 이미지를 불러오는 중입니다.");
           return current + 4;
         }
 
-        if (current < 58) {
-          setStatusText("세로형 비디오 프레임을 만드는 중입니다.");
+        if (current < 56) {
+          setStatusText(showLyrics ? "가사와 제목을 합성하는 중입니다." : "비디오 프레임을 만드는 중입니다.");
           return current + 3;
         }
 
         if (current < 82) {
-          setStatusText("확대/이동 효과를 적용하는 중입니다.");
+          setStatusText("영상 인코딩을 진행하고 있습니다.");
           return current + 2;
         }
 
@@ -111,6 +120,10 @@ export function VideoRenderControls({
         if (selectedFile) {
           formData.append("image", selectedFile);
         }
+
+        formData.append("showLyrics", showLyrics ? "true" : "false");
+        formData.append("showTitle", showTitle ? "true" : "false");
+        formData.append("titleText", title);
 
         const response = await fetch(`/api/music/${musicId}/video`, {
           method: "POST",
@@ -178,7 +191,11 @@ export function VideoRenderControls({
         disabled={isRendering}
         className="rounded-full border border-[var(--accent)] bg-[#fff1eb] px-3 py-2 text-[11px] font-semibold text-[var(--accent)] disabled:opacity-50"
       >
-        {isRendering ? `비디오 생성중 ${progress}%` : selectedFile ? "비디오+100" : "커버로 비디오+100"}
+        {isRendering
+          ? `비디오 생성중 ${progress}%`
+          : selectedFile
+            ? `비디오+${videoCost}`
+            : `커버로 비디오+${videoCost}`}
       </button>
       {mp4Url ? (
         <a
@@ -189,6 +206,26 @@ export function VideoRenderControls({
           비디오 {trackIndex}
         </a>
       ) : null}
+
+      <label className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-3 py-2 text-[11px] font-semibold text-[#4e3b30]">
+        <input
+          type="checkbox"
+          checked={showLyrics}
+          onChange={(event) => setShowLyrics(event.target.checked)}
+          className="h-3.5 w-3.5"
+        />
+        가사 표시
+      </label>
+      <label className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-3 py-2 text-[11px] font-semibold text-[#4e3b30]">
+        <input
+          type="checkbox"
+          checked={showTitle}
+          onChange={(event) => setShowTitle(event.target.checked)}
+          className="h-3.5 w-3.5"
+        />
+        제목 표시
+      </label>
+
       {isRendering || progress > 0 ? (
         <div className="w-full rounded-[1rem] border border-[var(--border)] bg-white/80 px-3 py-3">
           <div className="flex items-center justify-between gap-3 text-[11px] font-semibold text-[#6f5849]">

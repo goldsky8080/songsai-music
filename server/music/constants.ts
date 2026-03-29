@@ -2,9 +2,14 @@
 export const SINGLE_TRACK_GENERATION_COST = 500;
 export const ADDITIONAL_TRACK_UNLOCK_COST = 200;
 export const VIDEO_RENDER_COST = 100;
+export const VIDEO_RENDER_WITH_LYRICS_COST = 300;
 export const BONUS_TRACK_UNLOCK_WINDOW_DAYS = 7;
 export const DOWNLOAD_DELAY_MS = 5 * 60 * 1000;
 
 export function getMusicGenerationCost(_: 1 | 2 = 1) {
   return SINGLE_TRACK_GENERATION_COST;
+}
+
+export function getVideoRenderCost(includeLyrics: boolean) {
+  return includeLyrics ? VIDEO_RENDER_WITH_LYRICS_COST : VIDEO_RENDER_COST;
 }

@@ -230,6 +230,7 @@ export default function MusicHistoryPage() {
                                   trackId={track.id}
                                   trackIndex={index + 1}
                                   mp4Url={track.mp4Url}
+                                  title={item.title ?? "제목 없는 곡"}
                                   lyrics={item.lyrics}
                                   onCompleted={() => loadPage(pagination.page)}
                                 />
