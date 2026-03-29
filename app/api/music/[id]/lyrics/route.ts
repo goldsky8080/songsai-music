@@ -7,6 +7,16 @@ function sanitizeFileName(value: string) {
   return value.replace(/[\\/:*?"<>|]/g, "").trim() || "lyrics";
 }
 
+function encodeUtf8WithBom(value: string) {
+  const encoder = new TextEncoder();
+  const utf8 = encoder.encode(value);
+  const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
+  const output = new Uint8Array(bom.byteLength + utf8.byteLength);
+  output.set(bom, 0);
+  output.set(utf8, bom.byteLength);
+  return output;
+}
+
 function readLyricsFromResult(result: unknown) {
   if (!result || typeof result !== "object") {
     return null;
@@ -123,7 +133,7 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
 
   const title = sanitizeFileName(`lyrics-${music.createdAt.toISOString().slice(0, 10)}`);
 
-  return new NextResponse(lyricText, {
+  return new NextResponse(encodeUtf8WithBom(lyricText), {
     status: 200,
     headers: {
       "Content-Type": "text/plain; charset=utf-8",

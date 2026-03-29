@@ -46,12 +46,14 @@ export function VideoRenderControls({
 }: VideoRenderControlsProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const progressTimerRef = useRef<number | null>(null);
+  const pollingTimerRef = useRef<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isRendering, setIsRendering] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [showLyrics, setShowLyrics] = useState(true);
   const [showTitle, setShowTitle] = useState(true);
+  const [renderingVideoId, setRenderingVideoId] = useState<string | null>(null);
 
   const videoCost = showLyrics ? LYRICS_VIDEO_COST : BASE_VIDEO_COST;
 
@@ -59,6 +61,9 @@ export function VideoRenderControls({
     return () => {
       if (progressTimerRef.current !== null) {
         window.clearInterval(progressTimerRef.current);
+      }
+      if (pollingTimerRef.current !== null) {
+        window.clearInterval(pollingTimerRef.current);
       }
     };
   }, []);
@@ -109,6 +114,90 @@ export function VideoRenderControls({
     }
   }
 
+  function stopPolling() {
+    if (pollingTimerRef.current !== null) {
+      window.clearInterval(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
+  }
+
+  useEffect(() => {
+    if (!isRendering || !renderingVideoId) {
+      stopPolling();
+      return;
+    }
+
+    async function pollStatus() {
+      try {
+        const response = await fetch(`/api/music/${musicId}/video?videoId=${renderingVideoId}`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const data = await readJson(response);
+        const item =
+          data.item && typeof data.item === "object" ? (data.item as Record<string, unknown>) : null;
+
+        if (!item) {
+          return;
+        }
+
+        const status = typeof item.status === "string" ? item.status : null;
+        const nextMp4Url = typeof item.mp4Url === "string" ? item.mp4Url : null;
+        const errorMessage = typeof item.errorMessage === "string" ? item.errorMessage : null;
+
+        await onCompleted?.();
+
+        if (status === "COMPLETED" && nextMp4Url) {
+          stopPolling();
+          stopProgress();
+          setProgress(100);
+          setStatusText("완료되었습니다. 비디오를 다운로드합니다.");
+          setSelectedFile(null);
+          setRenderingVideoId(null);
+          if (inputRef.current) {
+            inputRef.current.value = "";
+          }
+          triggerDownload(nextMp4Url);
+          window.setTimeout(() => {
+            setIsRendering(false);
+            setProgress(0);
+            setStatusText(null);
+          }, 1200);
+          return;
+        }
+
+        if (status === "FAILED") {
+          stopPolling();
+          stopProgress();
+          setIsRendering(false);
+          setRenderingVideoId(null);
+          setProgress(0);
+          setStatusText(null);
+          window.alert(errorMessage ?? "비디오 생성에 실패했습니다.");
+        }
+      } catch (error) {
+        stopPolling();
+        stopProgress();
+        setIsRendering(false);
+        setRenderingVideoId(null);
+        setProgress(0);
+        setStatusText(null);
+        window.alert(error instanceof Error ? error.message : "비디오 상태를 확인하지 못했습니다.");
+      }
+    }
+
+    void pollStatus();
+    pollingTimerRef.current = window.setInterval(() => {
+      void pollStatus();
+    }, 4000);
+
+    return () => {
+      stopPolling();
+    };
+  }, [isRendering, renderingVideoId, musicId, onCompleted]);
+
   function handleCreateVideo() {
     setIsRendering(true);
     startProgress();
@@ -134,34 +223,23 @@ export function VideoRenderControls({
         const data = await readJson(response);
         const item =
           data.item && typeof data.item === "object" ? (data.item as Record<string, unknown>) : null;
-        const nextMp4Url = typeof item?.mp4Url === "string" ? item.mp4Url : null;
+        const nextVideoId = typeof item?.id === "string" ? item.id : null;
 
-        stopProgress();
-        setProgress(100);
-        setStatusText("완료되었습니다. 비디오를 다운로드합니다.");
-        setSelectedFile(null);
-
-        if (inputRef.current) {
-          inputRef.current.value = "";
+        if (!nextVideoId) {
+          throw new Error("비디오 작업 정보를 받지 못했습니다.");
         }
 
-        await onCompleted?.();
-
-        if (nextMp4Url) {
-          triggerDownload(nextMp4Url);
-        }
-
-        window.setTimeout(() => {
-          setProgress(0);
-          setStatusText(null);
-        }, 1200);
+        setRenderingVideoId(nextVideoId);
+        setStatusText("비디오 생성이 접수되었습니다. 완료 여부를 확인하는 중입니다.");
+        setProgress((current) => Math.max(current, 18));
       } catch (error) {
+        stopPolling();
         stopProgress();
+        setIsRendering(false);
+        setRenderingVideoId(null);
         setProgress(0);
         setStatusText(null);
         window.alert(error instanceof Error ? error.message : "비디오 생성에 실패했습니다.");
-      } finally {
-        setIsRendering(false);
       }
     })();
   }

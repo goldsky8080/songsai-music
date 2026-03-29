@@ -25,6 +25,135 @@ function readTitleFromPayload(payload: unknown) {
   return typeof title === "string" && title.trim().length > 0 ? title.trim() : null;
 }
 
+type StartVideoRenderParams = {
+  userId: string;
+  videoId: string;
+  musicId: string;
+  audioUrl: string;
+  imageBuffer?: Buffer;
+  imageMimeType?: string;
+  imageUrl?: string;
+  alignedLyricLines: ReturnType<typeof buildAlignedLyricLines>;
+  titleText?: string;
+};
+
+async function processVideoRender({
+  userId,
+  videoId,
+  musicId,
+  audioUrl,
+  imageBuffer,
+  imageMimeType,
+  imageUrl,
+  alignedLyricLines,
+  titleText,
+}: StartVideoRenderParams) {
+  try {
+    const rendered = await renderVideoFromImage({
+      audioUrl,
+      videoId,
+      imageBuffer,
+      imageMimeType,
+      imageUrl,
+      alignedLyricLines,
+      titleText,
+    });
+
+    await db.$transaction([
+      db.video.update({
+        where: { id: videoId },
+        data: {
+          mp4Url: rendered.mp4Url,
+          bgImageUrl: rendered.bgImageUrl,
+          status: VideoStatus.COMPLETED,
+          errorMessage: null,
+        },
+      }),
+      db.generationJob.updateMany({
+        where: {
+          videoId,
+          jobType: "VIDEO_RENDER",
+        },
+        data: {
+          queueStatus: QueueStatus.COMPLETED,
+          result: rendered,
+          errorMessage: null,
+        },
+      }),
+    ]);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "비디오 생성에 실패했습니다.";
+
+    await db.$transaction([
+      db.video.update({
+        where: { id: videoId },
+        data: {
+          status: VideoStatus.FAILED,
+          errorMessage,
+        },
+      }),
+      db.generationJob.updateMany({
+        where: {
+          videoId,
+          jobType: "VIDEO_RENDER",
+        },
+        data: {
+          queueStatus: QueueStatus.FAILED,
+          errorMessage,
+        },
+      }),
+    ]);
+
+    await refundVideoRenderCredits(userId, videoId);
+
+    console.error("[video-render] Background render failed", {
+      userId,
+      musicId,
+      videoId,
+      error: errorMessage,
+    });
+  }
+}
+
+export async function GET(request: Request, context: RouteContext) {
+  const sessionUser = await getSessionUser();
+
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id } = await context.params;
+  const videoId = new URL(request.url).searchParams.get("videoId");
+
+  const music = await db.music.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      userId: true,
+    },
+  });
+
+  if (!music || music.userId !== sessionUser.id) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const video = await db.video.findFirst({
+    where: {
+      musicId: music.id,
+      ...(videoId ? { id: videoId } : {}),
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  if (!video) {
+    return NextResponse.json({ error: "비디오를 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  return NextResponse.json({ item: video });
+}
+
 export async function POST(request: Request, context: RouteContext) {
   const sessionUser = await getSessionUser();
 
@@ -197,65 +326,25 @@ export async function POST(request: Request, context: RouteContext) {
     return video;
   });
 
-  try {
-    const rendered = await renderVideoFromImage({
-      audioUrl: resolvedAudioUrl,
-      videoId: created.id,
-      imageBuffer,
-      imageMimeType: hasUploadedImage ? imageFile.type : undefined,
-      imageUrl: hasUploadedImage ? undefined : providerImageUrl ?? undefined,
-      alignedLyricLines: showLyrics ? alignedLyricLines : [],
-      titleText: showTitle ? resolvedTitleText : undefined,
-    });
+  void processVideoRender({
+    userId: sessionUser.id,
+    videoId: created.id,
+    musicId: music.id,
+    audioUrl: resolvedAudioUrl,
+    imageBuffer,
+    imageMimeType: hasUploadedImage ? imageFile.type : undefined,
+    imageUrl: hasUploadedImage ? undefined : providerImageUrl ?? undefined,
+    alignedLyricLines: showLyrics ? alignedLyricLines : [],
+    titleText: showTitle ? resolvedTitleText : undefined,
+  });
 
-    const updated = await db.video.update({
-      where: { id: created.id },
-      data: {
-        mp4Url: rendered.mp4Url,
-        bgImageUrl: rendered.bgImageUrl,
-        status: VideoStatus.COMPLETED,
-        errorMessage: null,
+  return NextResponse.json(
+    {
+      item: {
+        id: created.id,
+        status: VideoStatus.PROCESSING,
       },
-    });
-
-    await db.generationJob.updateMany({
-      where: {
-        videoId: created.id,
-        jobType: "VIDEO_RENDER",
-      },
-      data: {
-        queueStatus: QueueStatus.COMPLETED,
-        result: rendered,
-        errorMessage: null,
-      },
-    });
-
-    return NextResponse.json({ item: updated }, { status: 201 });
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "비디오 생성에 실패했습니다.";
-
-    await db.$transaction([
-      db.video.update({
-        where: { id: created.id },
-        data: {
-          status: VideoStatus.FAILED,
-          errorMessage,
-        },
-      }),
-      db.generationJob.updateMany({
-        where: {
-          videoId: created.id,
-          jobType: "VIDEO_RENDER",
-        },
-        data: {
-          queueStatus: QueueStatus.FAILED,
-          errorMessage,
-        },
-      }),
-    ]);
-
-    await refundVideoRenderCredits(sessionUser.id, created.id);
-
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
-  }
+    },
+    { status: 202 },
+  );
 }
