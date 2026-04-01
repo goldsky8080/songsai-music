@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import { VideoRenderControls } from "@/components/video-render-controls";
@@ -26,11 +26,24 @@ export function TrackDownloadMenu({
 }: TrackDownloadMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
 
+  async function openMenu() {
+    setIsOpen(true);
+
+    try {
+      await fetch(`/api/music/${trackId}/prepare-assets`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // ignore prepare failures and let normal download fallback handle it
+    }
+  }
+
   return (
     <>
       <button
         type="button"
-        onClick={() => setIsOpen(true)}
+        onClick={openMenu}
         className="rounded-full bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white"
       >
         다운로드 {trackIndex}

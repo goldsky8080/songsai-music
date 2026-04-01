@@ -1,7 +1,13 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { access } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
+import { MusicAssetType } from "@prisma/client";
+import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { DOWNLOAD_DELAY_MS } from "@/server/music/constants";
+import { buildAlignedLyricLines } from "@/server/music/aligned-lyrics";
+import { syncMusicAssets } from "@/server/music/asset-storage";
 import { getMusicProvider } from "@/server/music/provider";
 
 type RouteContext = {
@@ -53,6 +59,22 @@ type DownloadStreamResult = {
   stream: ReadableStream<Uint8Array>;
   contentType: string | null;
 };
+
+async function getLocalAssetStream(
+  storagePath: string,
+  contentType: string | null,
+): Promise<DownloadStreamResult | null> {
+  try {
+    await access(storagePath);
+
+    return {
+      stream: Readable.toWeb(createReadStream(storagePath)) as ReadableStream<Uint8Array>,
+      contentType,
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function fetchDownloadStream(
   url: string,
@@ -130,6 +152,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
       bonusUnlockedAt: true,
       createdAt: true,
       updatedAt: true,
+      assets: {
+        where: {
+          assetType: MusicAssetType.MP3,
+        },
+        select: {
+          status: true,
+          storagePath: true,
+          mimeType: true,
+        },
+        take: 1,
+      },
       generationJobs: {
         where: {
           jobType: "MUSIC_GENERATION",
@@ -153,7 +186,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "추가곡을 먼저 열어야 다운로드할 수 있습니다." }, { status: 403 });
   }
 
-  if (!music.mp3Url) {
+  if (!music.mp3Url && !music.providerTaskId) {
     return NextResponse.json({ error: "MP3 파일이 아직 준비되지 않았습니다." }, { status: 409 });
   }
 
@@ -170,17 +203,26 @@ export async function GET(request: NextRequest, context: RouteContext) {
     );
   }
 
-  let resolvedMp3Url = music.mp3Url;
-  let upstream = isInlinePlayback
-    ? null
-    : await fetchDownloadStream(resolvedMp3Url, {
-        verifyBytes: true,
-      });
+  let resolvedMp3Url = music.mp3Url ?? null;
+  const localMp3Asset = music.assets[0] ?? null;
+  let upstream =
+    localMp3Asset?.status === "READY" && localMp3Asset.storagePath
+      ? await getLocalAssetStream(localMp3Asset.storagePath, localMp3Asset.mimeType)
+      : null;
 
-  if ((isInlinePlayback || !upstream) && music.providerTaskId) {
+  if (!upstream && !isInlinePlayback && resolvedMp3Url) {
+    upstream = await fetchDownloadStream(resolvedMp3Url, {
+      verifyBytes: true,
+    });
+  }
+
+  if (!upstream && music.providerTaskId) {
     try {
       const provider = getMusicProvider();
       const latest = await provider.getMusicStatus(music.providerTaskId);
+      const alignedWords = await provider.getAlignedLyrics(music.providerTaskId).catch(() => []);
+      const alignedLines = alignedWords.length > 0 ? buildAlignedLyricLines(alignedWords) : [];
+      const titleText = readTitleFromPayload(music.generationJobs[0]?.payload);
 
       if (latest.mp3Url) {
         resolvedMp3Url = latest.mp3Url;
@@ -194,8 +236,38 @@ export async function GET(request: NextRequest, context: RouteContext) {
           });
         }
 
-        if (!isInlinePlayback) {
-          upstream = await fetchDownloadStream(resolvedMp3Url, {
+        await syncMusicAssets({
+          musicId: music.id,
+          mp3Url: latest.mp3Url,
+          imageUrl: latest.imageLargeUrl ?? latest.imageUrl ?? null,
+          alignedWords,
+          alignedLines,
+          titleText,
+        });
+
+        const refreshedLocalAsset = await db.musicAsset.findUnique({
+          where: {
+            musicId_assetType: {
+              musicId: music.id,
+              assetType: MusicAssetType.MP3,
+            },
+          },
+          select: {
+            status: true,
+            storagePath: true,
+            mimeType: true,
+          },
+        });
+
+        if (refreshedLocalAsset?.status === "READY" && refreshedLocalAsset.storagePath) {
+          upstream = await getLocalAssetStream(
+            refreshedLocalAsset.storagePath,
+            refreshedLocalAsset.mimeType,
+          );
+        }
+
+        if (!upstream && !isInlinePlayback) {
+          upstream = await fetchDownloadStream(latest.mp3Url, {
             verifyBytes: true,
           });
         }
@@ -209,7 +281,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
   }
 
-  if (isInlinePlayback) {
+  if (isInlinePlayback && !upstream && resolvedMp3Url) {
     return NextResponse.redirect(resolvedMp3Url, { status: 307 });
   }
 

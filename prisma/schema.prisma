@@ -82,6 +82,23 @@ enum QueueStatus {
   CANCELLED
 }
 
+/// 저장된 음악 재료 상태
+enum AssetStatus {
+  PENDING
+  READY
+  FAILED
+  DELETED
+}
+
+/// 음악/비디오 재료 파일 종류
+enum MusicAssetType {
+  MP3
+  COVER_IMAGE
+  ALIGNED_LYRICS_RAW_JSON
+  ALIGNED_LYRICS_LINES_JSON
+  TITLE_TEXT
+}
+
 /// 입금 요청 상태
 enum DepositRequestStatus {
   PENDING
@@ -133,12 +150,36 @@ model Music {
   updatedAt      DateTime        @updatedAt
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assets         MusicAsset[]
   videos         Video[]
   generationJobs GenerationJob[]
 
   @@index([userId, createdAt])
   @@index([requestGroupId, createdAt])
   @@index([status])
+}
+
+/// 비디오 생성에 재사용할 음악 원본/가공 재료 파일 메타데이터
+model MusicAsset {
+  id           String         @id @default(cuid())
+  musicId       String
+  assetType     MusicAssetType
+  status        AssetStatus    @default(PENDING)
+  sourceUrl     String?
+  storagePath   String?
+  publicUrl     String?
+  mimeType      String?
+  fileSize      Int?
+  errorMessage  String?
+  metadata      Json?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  music         Music          @relation(fields: [musicId], references: [id], onDelete: Cascade)
+
+  @@unique([musicId, assetType])
+  @@index([musicId, status])
+  @@index([assetType, status])
 }
 
 /// 향후 MP4/자막 합성용 결과물
