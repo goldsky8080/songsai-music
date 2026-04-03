@@ -106,21 +106,63 @@ async function fetchDownloadStream(
     return null;
   }
 
+  let streamClosed = false;
+
+  const safeClose = (controller: ReadableStreamDefaultController<Uint8Array>) => {
+    if (streamClosed) {
+      return;
+    }
+
+    streamClosed = true;
+
+    try {
+      controller.close();
+    } catch {
+      // The consumer may already have closed the stream.
+    }
+  };
+
+  const safeEnqueue = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    value: Uint8Array,
+  ) => {
+    if (streamClosed) {
+      return false;
+    }
+
+    try {
+      controller.enqueue(value);
+      return true;
+    } catch {
+      streamClosed = true;
+      return false;
+    }
+  };
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(firstChunk.value);
+      safeEnqueue(controller, firstChunk.value);
     },
     async pull(controller) {
-      const chunk = await reader.read();
-
-      if (chunk.done) {
-        controller.close();
+      if (streamClosed) {
         return;
       }
 
-      controller.enqueue(chunk.value);
+      try {
+        const chunk = await reader.read();
+
+        if (chunk.done) {
+          safeClose(controller);
+          return;
+        }
+
+        safeEnqueue(controller, chunk.value);
+      } catch {
+        safeClose(controller);
+      }
     },
     async cancel(reason) {
+      streamClosed = true;
       await reader.cancel(reason).catch(() => undefined);
     },
   });
